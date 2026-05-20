@@ -45,7 +45,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout (for the patch fragment)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download installer from the release
         run: |
