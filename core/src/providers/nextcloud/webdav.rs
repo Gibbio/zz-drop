@@ -1,9 +1,10 @@
-use std::time::Duration;
-
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use thiserror::Error;
 use ureq::Agent;
 use ureq::http::Request;
+
+use crate::http::tls_error::transport_message;
+use crate::http::{AgentOpts, build_agent};
 
 #[derive(Debug, Error)]
 pub enum WebDavError {
@@ -58,11 +59,10 @@ impl WebDavClient {
         // PROPPATCH, COPY, MOVE, LOCK, UNLOCK with `MethodVersionMismatch`
         // ("MKCOL not valid for HTTP version HTTP/1.1"). The flag bypasses
         // that check; it does not weaken TLS, auth, or any other validation.
-        let agent: Agent = Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(30)))
-            .allow_non_standard_methods(true)
-            .build()
-            .into();
+        let agent: Agent = build_agent(AgentOpts {
+            allow_non_standard_methods: true,
+            ..AgentOpts::with_global_timeout(30)
+        });
         Self { auth, agent }
     }
 
@@ -197,7 +197,7 @@ fn map_status(resp: UreqRunResult) -> Result<u16, WebDavError> {
             }
         }
         Err(ureq::Error::StatusCode(s)) => Err(classify(s)),
-        Err(e) => Err(WebDavError::Transport(format!("{e}"))),
+        Err(e) => Err(WebDavError::Transport(transport_message(&e))),
     }
 }
 
@@ -212,7 +212,7 @@ fn check_2xx(resp: UreqRunResult) -> Result<ureq::http::Response<ureq::Body>, We
             }
         }
         Err(ureq::Error::StatusCode(s)) => Err(classify(s)),
-        Err(e) => Err(WebDavError::Transport(format!("{e}"))),
+        Err(e) => Err(WebDavError::Transport(transport_message(&e))),
     }
 }
 

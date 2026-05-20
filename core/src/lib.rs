@@ -8,6 +8,7 @@ pub mod config;
 pub mod crypto;
 pub mod diag_log;
 pub mod errors;
+pub mod http;
 pub mod output;
 pub mod profile;
 pub mod providers;

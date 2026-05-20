@@ -24,6 +24,7 @@ use ureq::Agent;
 use ureq::http::Request;
 
 use super::errors::GoogleDriveError;
+use crate::http::{AgentOpts, build_agent};
 use super::types::{EXPIRY_SKEW_SECS, GoogleDriveAuth, GoogleDriveProfile};
 use crate::providers::CollisionPolicy;
 use crate::providers::nextcloud::collision::rename_with_suffix;
@@ -51,11 +52,10 @@ impl GoogleDriveClient {
             return Err(GoogleDriveError::BadRoot);
         }
 
-        let agent: Agent = Agent::config_builder()
-            .timeout_global(Some(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS)))
-            .http_status_as_error(false)
-            .build()
-            .into();
+        let agent: Agent = build_agent(AgentOpts {
+            http_status_as_error: Some(false),
+            ..AgentOpts::with_global_timeout(HTTP_TIMEOUT_SECS)
+        });
 
         Ok(Self {
             profile: RefCell::new(profile),
@@ -488,7 +488,10 @@ impl GoogleDriveClient {
         let req = builder
             .body(final_body)
             .map_err(|_| GoogleDriveError::Network)?;
-        let resp = self.agent.run(req).map_err(|_| GoogleDriveError::Network)?;
+        let resp = self
+            .agent
+            .run(req)
+            .map_err(|e| GoogleDriveError::from_ureq_transport(&e))?;
         let status = resp.status().as_u16();
         let bytes = read_body(resp)?;
         Ok((status, bytes))
@@ -507,7 +510,10 @@ impl GoogleDriveClient {
             .header("User-Agent", "zz-drop")
             .body(Vec::<u8>::new())
             .map_err(|_| GoogleDriveError::Network)?;
-        let resp = self.agent.run(req).map_err(|_| GoogleDriveError::Network)?;
+        let resp = self
+            .agent
+            .run(req)
+            .map_err(|e| GoogleDriveError::from_ureq_transport(&e))?;
         let status = resp.status().as_u16();
         let bytes = read_body(resp)?;
         Ok((status, bytes))

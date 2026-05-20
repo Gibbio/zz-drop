@@ -5,6 +5,7 @@
 
 use thiserror::Error;
 
+use crate::http::tls_error::{TLS_TRUST_HINT, tls_trust_hint};
 use crate::providers::oauth::DeviceFlowError;
 
 #[derive(Debug, Error)]
@@ -36,11 +37,23 @@ pub enum GoogleDriveError {
     #[error("network error")]
     Network,
 
+    #[error("TLS verification failed — {0}")]
+    TlsTrustFailed(&'static str),
+
     #[error("local io error")]
     LocalIo,
 
     #[error("malformed response")]
     Decode,
+}
+
+impl GoogleDriveError {
+    pub fn from_ureq_transport(err: &ureq::Error) -> Self {
+        match tls_trust_hint(err) {
+            Some(hint) => Self::TlsTrustFailed(hint),
+            None => Self::Network,
+        }
+    }
 }
 
 /// Single short, sanitised line for stderr / exit-code 9 path.
@@ -56,6 +69,7 @@ pub fn diagnose(err: &GoogleDriveError) -> &'static str {
         GoogleDriveError::RateLimited => "rate limited",
         GoogleDriveError::ServerError { .. } => "server error",
         GoogleDriveError::Network => "network error",
+        GoogleDriveError::TlsTrustFailed(_) => TLS_TRUST_HINT,
         GoogleDriveError::LocalIo => "local file error",
         GoogleDriveError::Decode => "bad server response",
     }

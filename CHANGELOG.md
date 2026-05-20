@@ -13,6 +13,57 @@ surfaces frozen on the road to 1.0 are listed in
 
 ## [Unreleased]
 
+### Changed
+
+- **TLS trust set: operating system trust store, not the embedded
+  Mozilla bundle.** Outbound HTTPS in `zz-drop-core` (every
+  provider client + the API client + WebDAV + OAuth flows) now
+  goes through `rustls` with
+  [`rustls-platform-verifier`](https://docs.rs/rustls-platform-verifier/0.7.0/)
+  via ureq's `platform-verifier` feature. On macOS this is
+  Security.framework, on Windows SChannel, on Linux the system
+  CA bundle. Practical effect: zz-drop works behind corporate
+  TLS-inspection proxies and against self-hosted Nextcloud
+  instances whose certificate chain ends at a CA the operator
+  has installed system-wide. There is no `--insecure` flag; an
+  unverifiable certificate is still a hard failure.
+- **`SSL_CERT_FILE` is honored** as the standard OpenSSL escape
+  valve. When set to a readable PEM, *only* the certificates in
+  that file are trusted for the duration of the run — useful
+  when a corporate CA is shipped as a `.pem` but cannot be
+  installed system-wide.
+- **Centralized HTTP agent factory.** Every `ureq::Agent` in
+  `zz-drop-core` is built through `zz_drop_core::http::build_agent`,
+  ensuring a uniform trust set and timeout policy across the
+  crate. New `zz_drop_core::http::tls_error::tls_trust_hint`
+  recognises rustls "invalid peer certificate" failures and
+  yields a one-line operator hint pointing at the env var
+  override.
+- **Provider errors now distinguish TLS trust failures from
+  generic network errors.** `OneDriveError`, `DropboxError`,
+  `GoogleDriveError`, `LoginFlowError`, `DeviceFlowError`, and
+  `PasteCodeError` gain a `TlsTrustFailed(&'static str)` variant
+  that carries the operator hint and is produced by their
+  `from_ureq_transport` helper when the underlying ureq error
+  is a certificate rejection. The WebDAV client and
+  `ApiClient` (which already carried `String` payloads for
+  transport errors) append the hint inline via
+  `zz_drop_core::http::tls_error::transport_message`. End users
+  see a clear "TLS verification failed — set `SSL_CERT_FILE` or
+  ask your administrator to install the corp CA…" message
+  instead of a generic "network error".
+
+### Security
+
+- Trust-set change: see the entry above. The set of issuers
+  zz-drop will accept is now whatever the operating system
+  already accepts — same as the browser, `curl`, `ssh`,
+  package managers. No silent expansion: only CAs the OS
+  already trusts. Documented in
+  [`SECURITY.md`](SECURITY.md),
+  [`docs/security-model.md`](docs/security-model.md), and on
+  the public security page at `zz-drop.net/security`.
+
 ## [0.9.3] — 2026-05-18
 
 Unified shell-completion install path. One command everywhere

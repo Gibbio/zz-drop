@@ -5,6 +5,7 @@
 
 use thiserror::Error;
 
+use crate::http::tls_error::{TLS_TRUST_HINT, tls_trust_hint};
 use crate::providers::oauth::DeviceFlowError;
 
 #[derive(Debug, Error)]
@@ -36,11 +37,26 @@ pub enum OneDriveError {
     #[error("network error")]
     Network,
 
+    #[error("TLS verification failed — {0}")]
+    TlsTrustFailed(&'static str),
+
     #[error("local io error")]
     LocalIo,
 
     #[error("malformed response")]
     Decode,
+}
+
+impl OneDriveError {
+    /// Map a `ureq::Error` from `Agent::run` into either the targeted
+    /// [`Self::TlsTrustFailed`] variant when it looks like a cert
+    /// rejection, or the generic [`Self::Network`] otherwise.
+    pub fn from_ureq_transport(err: &ureq::Error) -> Self {
+        match tls_trust_hint(err) {
+            Some(hint) => Self::TlsTrustFailed(hint),
+            None => Self::Network,
+        }
+    }
 }
 
 /// Single short, sanitised line for stderr / exit-code 9 path.
@@ -56,6 +72,7 @@ pub fn diagnose(err: &OneDriveError) -> &'static str {
         OneDriveError::RateLimited => "rate limited",
         OneDriveError::ServerError { .. } => "server error",
         OneDriveError::Network => "network error",
+        OneDriveError::TlsTrustFailed(_) => TLS_TRUST_HINT,
         OneDriveError::LocalIo => "local file error",
         OneDriveError::Decode => "bad server response",
     }

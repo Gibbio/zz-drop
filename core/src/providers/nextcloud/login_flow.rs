@@ -1,10 +1,12 @@
 use std::fmt;
-use std::time::Duration;
 
 use serde::Deserialize;
 use thiserror::Error;
 use ureq::Agent;
 use ureq::http::Request;
+
+use crate::http::tls_error::tls_trust_hint;
+use crate::http::{AgentOpts, build_agent};
 
 #[derive(Debug, Error)]
 pub enum LoginFlowError {
@@ -14,11 +16,23 @@ pub enum LoginFlowError {
     #[error("network error")]
     Network,
 
+    #[error("TLS verification failed — {0}")]
+    TlsTrustFailed(&'static str),
+
     #[error("server returned {status}")]
     ServerError { status: u16 },
 
     #[error("malformed response from server")]
     Decode,
+}
+
+impl LoginFlowError {
+    fn from_ureq_transport(err: &ureq::Error) -> Self {
+        match tls_trust_hint(err) {
+            Some(hint) => Self::TlsTrustFailed(hint),
+            None => Self::Network,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -60,10 +74,7 @@ impl Default for LoginFlowClient {
 
 impl LoginFlowClient {
     pub fn new() -> Self {
-        let agent: Agent = Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(30)))
-            .build()
-            .into();
+        let agent: Agent = build_agent(AgentOpts::with_global_timeout(30));
         Self { agent }
     }
 
@@ -90,7 +101,7 @@ impl LoginFlowClient {
                 });
             }
             Err(ureq::Error::StatusCode(s)) => return Err(LoginFlowError::ServerError { status: s }),
-            Err(_) => return Err(LoginFlowError::Network),
+            Err(e) => return Err(LoginFlowError::from_ureq_transport(&e)),
         };
 
         let body = response

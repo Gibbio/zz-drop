@@ -38,6 +38,16 @@ This repository's contribution to the project's security posture:
 - 10-minute TTL auto-lock + 5-minute locked-idle exit.
 - no log file; the agent never opens stdout/stderr.
 - no telemetry, no analytics, no usage pings.
+- HTTPS to providers and to `zz-drop.net` uses **rustls with the
+  operating system trust store** (Security.framework on macOS,
+  SChannel on Windows, the system CA bundle on Linux). Any
+  certificate the OS already trusts — including a CA your
+  administrator installed for a corporate TLS-inspection proxy —
+  is honored. There is no `--insecure` flag. To pin a specific
+  bundle of roots and ignore everything else, set
+  `SSL_CERT_FILE=/path/to/roots.pem` before invoking zz-drop;
+  only the PEM certificates in that file will be trusted for the
+  duration of the run.
 
 ## What you should know before deploying
 

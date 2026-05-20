@@ -348,6 +348,27 @@ working" cause when a daily command says `agent_locked`.
 | `failed reason=container_ambiguous` | both `profiles-local.zz` and `profiles-remote.zz` exist | `--local` or `--remote` |
 | `no remote matches` on `zz d 'pattern'` | shell expanded the glob locally | quote the pattern |
 | `is not zstd-compressed` from `zz dx` | the file isn't a `.zst` — `dx` is no-op | rename or drop the `x` |
+| `invalid peer certificate` on any provider call | corporate TLS-inspection proxy or self-hosted provider with private CA | install the corp CA in the system trust store (the OS-level keychain / certificate store), or export `SSL_CERT_FILE=/path/to/corp-ca.pem` and re-run |
 
 For anything else, run `zz f --json` and read the `doctor_check`
 records — most state-related failures show up there.
+
+## Behind a corporate TLS-inspection proxy
+
+zz-drop's HTTPS clients use the **operating system trust store**.
+If your administrator has installed the corporate root CA in the
+system keychain (macOS) / certificate store (Windows) /
+`/etc/ssl/certs` (Linux), it works out of the box: zz-drop trusts
+the same set of issuers that your browser, `curl`, `ssh`, and
+package managers trust.
+
+If you only have the CA as a `.pem` file and no permission to
+install it system-wide, point zz-drop at the file directly:
+
+```sh
+export SSL_CERT_FILE=/path/to/corp-ca.pem
+zz file.md
+```
+
+While `SSL_CERT_FILE` is set, **only** the certificates in that
+PEM are trusted. Unset it to go back to the system trust store.

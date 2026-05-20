@@ -77,6 +77,7 @@ fn login_flow_diag(e: &LoginFlowError) -> &'static str {
     match e {
         LoginFlowError::BadUrl => "invalid server url",
         LoginFlowError::Network => "network error",
+        LoginFlowError::TlsTrustFailed(hint) => hint,
         LoginFlowError::ServerError { .. } => "server error",
         LoginFlowError::Decode => "bad response",
     }

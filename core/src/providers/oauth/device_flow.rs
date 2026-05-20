@@ -11,13 +11,15 @@
 //! decode the OAuth error JSON the spec mandates on `400`.
 
 use std::fmt;
-use std::time::Duration;
 
 use serde::Deserialize;
 use thiserror::Error;
 use ureq::Agent;
 use ureq::http::Request;
 use url::form_urlencoded;
+
+use crate::http::tls_error::tls_trust_hint;
+use crate::http::{AgentOpts, build_agent};
 
 const USER_AGENT: &str = "zz-drop";
 const DEFAULT_POLL_INTERVAL_SECS: u64 = 5;
@@ -29,6 +31,9 @@ pub enum DeviceFlowError {
 
     #[error("network error")]
     Network,
+
+    #[error("TLS verification failed — {0}")]
+    TlsTrustFailed(&'static str),
 
     #[error("server returned {status}")]
     ServerError { status: u16 },
@@ -50,6 +55,15 @@ pub enum DeviceFlowError {
 
     #[error("oauth error: {0}")]
     Other(String),
+}
+
+impl DeviceFlowError {
+    fn from_ureq_transport(err: &ureq::Error) -> Self {
+        match tls_trust_hint(err) {
+            Some(hint) => Self::TlsTrustFailed(hint),
+            None => Self::Network,
+        }
+    }
 }
 
 /// Inputs to a device flow exchange. Endpoint URLs and credentials are
@@ -150,11 +164,10 @@ impl<'a> DeviceFlowClient<'a> {
     pub fn new(cfg: DeviceFlowConfig<'a>) -> Self {
         // `http_status_as_error(false)` lets us read the body on 4xx
         // responses, which is required to decode the OAuth error JSON.
-        let agent: Agent = Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(30)))
-            .http_status_as_error(false)
-            .build()
-            .into();
+        let agent: Agent = build_agent(AgentOpts {
+            http_status_as_error: Some(false),
+            ..AgentOpts::with_global_timeout(30)
+        });
         Self { cfg, agent }
     }
 
@@ -238,7 +251,7 @@ impl<'a> DeviceFlowClient<'a> {
         let resp = self.agent.run(req);
         let mut response = match resp {
             Ok(r) => r,
-            Err(_) => return Err(DeviceFlowError::Network),
+            Err(e) => return Err(DeviceFlowError::from_ureq_transport(&e)),
         };
         let status = response.status().as_u16();
         let bytes = response

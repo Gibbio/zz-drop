@@ -28,7 +28,7 @@ zeroize = "1"
 directories = "6"
 toml = "1"
 postcard = { version = "1", features = ["use-std"] }
-ureq = "3"
+ureq = { version = "3", features = ["platform-verifier"] }
 url = "2"
 percent-encoding = "2"
 quick-xml = "0.39"

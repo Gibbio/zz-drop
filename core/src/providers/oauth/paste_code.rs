@@ -19,7 +19,6 @@
 //! materialises.
 
 use std::fmt;
-use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -32,6 +31,8 @@ use ureq::http::Request;
 use url::form_urlencoded;
 
 use super::device_flow::{DeviceFlowError, TokenResponse};
+use crate::http::tls_error::tls_trust_hint;
+use crate::http::{AgentOpts, build_agent};
 
 const USER_AGENT: &str = "zz-drop";
 
@@ -64,6 +65,9 @@ pub enum PasteCodeError {
     #[error("network error")]
     Network,
 
+    #[error("TLS verification failed — {0}")]
+    TlsTrustFailed(&'static str),
+
     #[error("server returned {status}")]
     ServerError { status: u16 },
 
@@ -84,6 +88,15 @@ pub enum PasteCodeError {
 
     #[error("oauth error: {0}")]
     Other(String),
+}
+
+impl PasteCodeError {
+    fn from_ureq_transport(err: &ureq::Error) -> Self {
+        match tls_trust_hint(err) {
+            Some(hint) => Self::TlsTrustFailed(hint),
+            None => Self::Network,
+        }
+    }
 }
 
 /// PKCE-driven Authorization Code client.
@@ -111,11 +124,10 @@ impl<'a> PasteCodeFlow<'a> {
     /// ticks later, and the exchange must use the same verifier
     /// that produced the original `code_challenge`.
     pub fn with_verifier(cfg: PasteCodeConfig<'a>, code_verifier: String) -> Self {
-        let agent: Agent = Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(30)))
-            .http_status_as_error(false)
-            .build()
-            .into();
+        let agent: Agent = build_agent(AgentOpts {
+            http_status_as_error: Some(false),
+            ..AgentOpts::with_global_timeout(30)
+        });
         Self {
             cfg,
             code_verifier,
@@ -197,7 +209,7 @@ impl<'a> PasteCodeFlow<'a> {
         let resp = self.agent.run(req);
         let mut response = match resp {
             Ok(r) => r,
-            Err(_) => return Err(PasteCodeError::Network),
+            Err(e) => return Err(PasteCodeError::from_ureq_transport(&e)),
         };
         let status = response.status().as_u16();
         let bytes = response
@@ -222,6 +234,7 @@ impl From<PasteCodeError> for DeviceFlowError {
         match value {
             PasteCodeError::BadEndpoint => DeviceFlowError::BadEndpoint,
             PasteCodeError::Network => DeviceFlowError::Network,
+            PasteCodeError::TlsTrustFailed(hint) => DeviceFlowError::TlsTrustFailed(hint),
             PasteCodeError::ServerError { status } => DeviceFlowError::ServerError { status },
             PasteCodeError::Decode => DeviceFlowError::Decode,
             PasteCodeError::AccessDenied => DeviceFlowError::AccessDenied,

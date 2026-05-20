@@ -24,6 +24,7 @@ use ureq::Agent;
 use ureq::http::Request;
 
 use super::errors::OneDriveError;
+use crate::http::{AgentOpts, build_agent};
 use super::types::{EXPIRY_SKEW_SECS, OneDriveAuth, OneDriveProfile};
 use crate::providers::CollisionPolicy;
 use crate::providers::nextcloud::collision::rename_with_suffix;
@@ -50,11 +51,10 @@ impl OneDriveClient {
             return Err(OneDriveError::BadRoot);
         }
 
-        let agent: Agent = Agent::config_builder()
-            .timeout_global(Some(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS)))
-            .http_status_as_error(false)
-            .build()
-            .into();
+        let agent: Agent = build_agent(AgentOpts {
+            http_status_as_error: Some(false),
+            ..AgentOpts::with_global_timeout(HTTP_TIMEOUT_SECS)
+        });
 
         Ok(Self {
             profile: RefCell::new(profile),
@@ -450,7 +450,10 @@ impl OneDriveClient {
         let req = builder
             .body(final_body)
             .map_err(|_| OneDriveError::Network)?;
-        let resp = self.agent.run(req).map_err(|_| OneDriveError::Network)?;
+        let resp = self
+            .agent
+            .run(req)
+            .map_err(|e| OneDriveError::from_ureq_transport(&e))?;
         let status = resp.status().as_u16();
         let bytes = read_body(resp)?;
         Ok((status, bytes))
@@ -465,7 +468,10 @@ impl OneDriveClient {
             .header("User-Agent", "zz-drop")
             .body(Vec::<u8>::new())
             .map_err(|_| OneDriveError::Network)?;
-        let resp = self.agent.run(req).map_err(|_| OneDriveError::Network)?;
+        let resp = self
+            .agent
+            .run(req)
+            .map_err(|e| OneDriveError::from_ureq_transport(&e))?;
         let status = resp.status().as_u16();
         let bytes = read_body(resp)?;
         Ok((status, bytes))
@@ -481,7 +487,10 @@ impl OneDriveClient {
             .header("Content-Type", "application/octet-stream")
             .body(body.to_vec())
             .map_err(|_| OneDriveError::Network)?;
-        let resp = self.agent.run(req).map_err(|_| OneDriveError::Network)?;
+        let resp = self
+            .agent
+            .run(req)
+            .map_err(|e| OneDriveError::from_ureq_transport(&e))?;
         let status = resp.status().as_u16();
         let bytes = read_body(resp)?;
         Ok((status, bytes))

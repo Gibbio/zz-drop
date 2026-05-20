@@ -65,6 +65,26 @@ is possible by construction.
 
 See `profile-format.md` for the envelope schema.
 
+## TLS trust set
+
+Outbound HTTPS connections (cloud providers, `zz-drop.net` API)
+go through `rustls` configured with the **operating system trust
+store** via `rustls-platform-verifier`:
+
+- macOS — Security.framework
+- Windows — SChannel
+- Linux — the system CA bundle (`/etc/ssl/certs` and friends)
+
+There is no embedded Mozilla CA bundle to fall back to and no
+`--insecure` flag to bypass verification. An unverifiable
+certificate is a hard failure.
+
+`SSL_CERT_FILE` is honored as the standard OpenSSL escape valve:
+when it points at a readable PEM, the certificates in that file
+become the **only** trusted roots for the run. This covers
+environments where a corporate CA is shipped as a `.pem` but
+cannot be installed system-wide.
+
 ## Logging rules
 
 The following must never appear in logs:

@@ -25,6 +25,8 @@ use crate::api::{
     LoginTotpChallenge, ProfileList, ProfileSummary, RegisterRequest, TotpDisableRequest,
     TotpEnrollResponse, TotpLoginRequest, TotpVerifyRequest,
 };
+use crate::http::tls_error::transport_message;
+use crate::http::{AgentOpts, build_agent};
 
 /// Result of `POST /auth/login`. Either an immediate session (TOTP off
 /// for the account) or a short-lived challenge that must be exchanged
@@ -77,13 +79,13 @@ impl ApiClient {
         // letting the TUI sit on a "logging in…" footer for the
         // full 30s global timeout. The global cap stays 30s to
         // give blob upload / download enough headroom.
-        let agent: Agent = Agent::config_builder()
-            .timeout_resolve(Some(Duration::from_secs(5)))
-            .timeout_connect(Some(Duration::from_secs(5)))
-            .timeout_global(Some(Duration::from_secs(30)))
-            .http_status_as_error(false)
-            .build()
-            .into();
+        let agent: Agent = build_agent(AgentOpts {
+            timeout_resolve: Some(Duration::from_secs(5)),
+            timeout_connect: Some(Duration::from_secs(5)),
+            timeout_global: Some(Duration::from_secs(30)),
+            http_status_as_error: Some(false),
+            ..AgentOpts::default()
+        });
         Self {
             base: base_url.into().trim_end_matches('/').to_string(),
             agent,
@@ -130,7 +132,7 @@ impl ApiClient {
         let resp = self
             .agent
             .run(req)
-            .map_err(|e| ApiClientError::Network(e.to_string()))?;
+            .map_err(|e| ApiClientError::Network(transport_message(&e)))?;
         require_2xx(resp).map(|_| ())
     }
 
@@ -151,7 +153,7 @@ impl ApiClient {
         let resp = self
             .agent
             .run(req)
-            .map_err(|e| ApiClientError::Network(e.to_string()))?;
+            .map_err(|e| ApiClientError::Network(transport_message(&e)))?;
         let raw = read_body_2xx(resp)?;
         // Discriminate by presence of `totp_required`. The two payloads
         // are disjoint so a peek at the JSON is enough.
@@ -189,7 +191,7 @@ impl ApiClient {
         let resp = self
             .agent
             .run(req)
-            .map_err(|e| ApiClientError::Network(e.to_string()))?;
+            .map_err(|e| ApiClientError::Network(transport_message(&e)))?;
         let raw = read_body_2xx(resp)?;
         serde_json::from_slice(&raw).map_err(|e| ApiClientError::Decode(e.to_string()))
     }
@@ -207,7 +209,7 @@ impl ApiClient {
         let resp = self
             .agent
             .run(req)
-            .map_err(|e| ApiClientError::Network(e.to_string()))?;
+            .map_err(|e| ApiClientError::Network(transport_message(&e)))?;
         let raw = read_body_2xx(resp)?;
         serde_json::from_slice(&raw).map_err(|e| ApiClientError::Decode(e.to_string()))
     }
@@ -229,7 +231,7 @@ impl ApiClient {
         let resp = self
             .agent
             .run(req)
-            .map_err(|e| ApiClientError::Network(e.to_string()))?;
+            .map_err(|e| ApiClientError::Network(transport_message(&e)))?;
         let raw = read_body_2xx(resp)?;
         serde_json::from_slice(&raw).map_err(|e| ApiClientError::Decode(e.to_string()))
     }
@@ -245,7 +247,7 @@ impl ApiClient {
         let resp = self
             .agent
             .run(req)
-            .map_err(|e| ApiClientError::Network(e.to_string()))?;
+            .map_err(|e| ApiClientError::Network(transport_message(&e)))?;
         read_body_2xx(resp)
     }
 
@@ -268,7 +270,7 @@ impl ApiClient {
         let resp = self
             .agent
             .run(req)
-            .map_err(|e| ApiClientError::Network(e.to_string()))?;
+            .map_err(|e| ApiClientError::Network(transport_message(&e)))?;
         let raw = read_body_2xx(resp)?;
         serde_json::from_slice(&raw).map_err(|e| ApiClientError::Decode(e.to_string()))
     }
@@ -284,7 +286,7 @@ impl ApiClient {
         let resp = self
             .agent
             .run(req)
-            .map_err(|e| ApiClientError::Network(e.to_string()))?;
+            .map_err(|e| ApiClientError::Network(transport_message(&e)))?;
         require_2xx(resp).map(|_| ())
     }
 
@@ -305,7 +307,7 @@ impl ApiClient {
         let resp = self
             .agent
             .run(req)
-            .map_err(|e| ApiClientError::Network(e.to_string()))?;
+            .map_err(|e| ApiClientError::Network(transport_message(&e)))?;
         let raw = read_body_2xx(resp)?;
         serde_json::from_slice(&raw).map_err(|e| ApiClientError::Decode(e.to_string()))
     }
@@ -326,7 +328,7 @@ impl ApiClient {
         let resp = self
             .agent
             .run(req)
-            .map_err(|e| ApiClientError::Network(e.to_string()))?;
+            .map_err(|e| ApiClientError::Network(transport_message(&e)))?;
         require_2xx(resp).map(|_| ())
     }
 
@@ -347,7 +349,7 @@ impl ApiClient {
         let resp = self
             .agent
             .run(req)
-            .map_err(|e| ApiClientError::Network(e.to_string()))?;
+            .map_err(|e| ApiClientError::Network(transport_message(&e)))?;
         require_2xx(resp).map(|_| ())
     }
 }

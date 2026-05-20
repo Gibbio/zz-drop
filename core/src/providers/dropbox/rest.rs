@@ -30,6 +30,7 @@ use ureq::Agent;
 use ureq::http::Request;
 
 use super::errors::DropboxError;
+use crate::http::{AgentOpts, build_agent};
 use super::types::{DropboxAuth, DropboxProfile, EXPIRY_SKEW_SECS};
 use crate::providers::CollisionPolicy;
 use crate::providers::nextcloud::collision::rename_with_suffix;
@@ -54,11 +55,10 @@ impl DropboxClient {
     pub fn from_profile(profile: DropboxProfile) -> Result<Self, DropboxError> {
         validate_root_folder(profile.root_folder.trim())?;
 
-        let agent: Agent = Agent::config_builder()
-            .timeout_global(Some(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS)))
-            .http_status_as_error(false)
-            .build()
-            .into();
+        let agent: Agent = build_agent(AgentOpts {
+            http_status_as_error: Some(false),
+            ..AgentOpts::with_global_timeout(HTTP_TIMEOUT_SECS)
+        });
 
         Ok(Self {
             profile: RefCell::new(profile),
@@ -405,7 +405,10 @@ impl DropboxClient {
             .header("Accept", "application/json")
             .body(body)
             .map_err(|_| DropboxError::Network)?;
-        let resp = self.agent.run(req).map_err(|_| DropboxError::Network)?;
+        let resp = self
+            .agent
+            .run(req)
+            .map_err(|e| DropboxError::from_ureq_transport(&e))?;
         let status = resp.status().as_u16();
         let bytes = read_body(resp)?;
         Ok((status, bytes))
@@ -421,7 +424,10 @@ impl DropboxClient {
             .header("Accept", "application/json")
             .body(Vec::<u8>::new())
             .map_err(|_| DropboxError::Network)?;
-        let resp = self.agent.run(req).map_err(|_| DropboxError::Network)?;
+        let resp = self
+            .agent
+            .run(req)
+            .map_err(|e| DropboxError::from_ureq_transport(&e))?;
         let status = resp.status().as_u16();
         let bytes = read_body(resp)?;
         Ok((status, bytes))
@@ -443,7 +449,10 @@ impl DropboxClient {
             .header("Content-Type", "application/octet-stream")
             .body(body.to_vec())
             .map_err(|_| DropboxError::Network)?;
-        let resp = self.agent.run(req).map_err(|_| DropboxError::Network)?;
+        let resp = self
+            .agent
+            .run(req)
+            .map_err(|e| DropboxError::from_ureq_transport(&e))?;
         let status = resp.status().as_u16();
         let bytes = read_body(resp)?;
         Ok((status, bytes))
@@ -463,7 +472,10 @@ impl DropboxClient {
             .header("Dropbox-API-Arg", arg_json_ascii)
             .body(Vec::<u8>::new())
             .map_err(|_| DropboxError::Network)?;
-        let resp = self.agent.run(req).map_err(|_| DropboxError::Network)?;
+        let resp = self
+            .agent
+            .run(req)
+            .map_err(|e| DropboxError::from_ureq_transport(&e))?;
         let status = resp.status().as_u16();
         let bytes = read_body(resp)?;
         Ok((status, bytes))
