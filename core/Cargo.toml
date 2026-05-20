@@ -31,7 +31,7 @@ postcard = { version = "1", features = ["use-std"] }
 ureq = { version = "3", features = ["platform-verifier"] }
 url = "2"
 percent-encoding = "2"
-quick-xml = "0.39"
+quick-xml = "0.40"
 zstd = "0.13"
 sha2 = "0.11"
 
