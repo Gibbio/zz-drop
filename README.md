@@ -43,6 +43,26 @@ the public key is [`release-key.pub`](release-key.pub).
 
 Build from source with full control: see [`docs/build.md`](docs/build.md).
 
+## Upgrade
+
+```bash
+# Homebrew
+brew upgrade zz-drop/zz-drop/zz-drop
+
+# curl-installer — same one-liner as install; idempotent
+curl -fsSL https://github.com/zz-drop/zz-drop/releases/latest/download/zz-drop-installer.sh | sh
+
+# Source (cargo install)
+cargo install --git https://github.com/zz-drop/zz-drop --locked --force zz-drop
+```
+
+The curl-installer has no version tracking and no `upgrade`
+subcommand — re-running the install one-liner *is* the upgrade.
+It fetches the latest tagged release, overwrites the binaries in
+`~/.local/bin`, and re-runs `zz --setup-completions` so completions
+track the new binary. Source-clone upgraders: see the dedicated
+[`docs/build.md#update`](docs/build.md#update) recipe.
+
 ## Quickstart
 
 ```bash
