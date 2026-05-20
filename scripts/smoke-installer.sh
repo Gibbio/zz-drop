@@ -157,18 +157,21 @@ run_scenario "fish: install + completion" '
     echo "ALL_GOOD"
 ' "ALL_GOOD"
 
-# 7. SHELL unset: graceful skip, no completion install attempted
-run_scenario "no SHELL: graceful skip (binaries still installed)" '
+# 7. SHELL unset: bash completion still installs (0.9.2 fix), zsh+fish skip.
+# Containers / cron / non-login SSH have no $SHELL but still want
+# bash completion working without manual setup. zsh and fish gate on
+# $SHELL because their target paths depend on user dotfile config.
+run_scenario "no SHELL: bash installs unconditionally, zsh/fish skip" '
     set -e
-    apk add --no-cache curl ca-certificates > /dev/null 2>&1
+    apk add --no-cache curl ca-certificates bash > /dev/null 2>&1
     unset SHELL
     sh -c "curl -fsSL ${INSTALLER_URL} | sh" > /tmp/log 2>&1
     test -x ~/.local/bin/zz-drop || { echo "BIN MISSING"; exit 1; }
-    grep -q "completion: \$SHELL not set; skip" /tmp/log || {
-        echo "EXPECTED skip MESSAGE NOT FOUND"; cat /tmp/log; exit 1
+    test -f ~/.local/share/bash-completion/completions/zz-drop || {
+        echo "BASH COMPLETION MISSING (0.9.2 fix regressed)"; cat /tmp/log; exit 1
     }
-    test ! -f ~/.local/share/bash-completion/completions/zz-drop || {
-        echo "BASH COMPLETION INSTALLED ANYWAY"; exit 1
+    test ! -f ~/.local/share/fish/vendor_completions.d/zz-drop.fish || {
+        echo "FISH COMPLETION INSTALLED WITHOUT \$SHELL"; exit 1
     }
     echo "ALL_GOOD"
 ' "ALL_GOOD"
