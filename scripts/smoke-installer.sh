@@ -17,9 +17,12 @@ set -eu
 
 VERSION="${1:-${VERSION:-}}"
 if [ -z "$VERSION" ]; then
-    # Latest pre-release tag (excludes v* without 'pre' for now)
-    VERSION=$(gh api 'repos/zz-drop/zz-drop/releases?per_page=5' \
-        --jq 'first(.[] | select(.prerelease==true) | .tag_name)' 2>/dev/null) || {
+    # Latest published release (any kind: stable, prerelease).
+    # Stable releases became the norm from 0.9.0 onward; the earlier
+    # filter on `prerelease==true` excluded them and left VERSION empty
+    # once the project went stable.
+    VERSION=$(gh api 'repos/zz-drop/zz-drop/releases/latest' \
+        --jq '.tag_name' 2>/dev/null) || {
         echo "smoke: unable to resolve VERSION (gh api failed); pass it explicitly"
         exit 2
     }
