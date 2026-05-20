@@ -118,7 +118,7 @@ run_scenario "zsh: framework-aware (oh-my-zsh detected → only fpath)" '
 source ~/.oh-my-zsh/oh-my-zsh.sh
 EOF
     SHELL=/bin/zsh sh -c "curl -fsSL ${INSTALLER_URL} | sh" > /dev/null 2>&1
-    grep -q "framework detected: oh-my-zsh" ~/.zshrc || {
+    grep -q "framework detected (oh-my-zsh)" ~/.zshrc || {
         echo "FRAMEWORK MARKER MISSING"; cat ~/.zshrc; exit 1
     }
     grep -q "fpath=" ~/.zshrc || { echo "FPATH MISSING"; exit 1; }
