@@ -137,7 +137,7 @@ fn draw(frame: &mut Frame<'_>, proto: ProtocolType, picker: &mut Picker, dyn_img
             Style::default(),
         );
     } else {
-        match picker.new_protocol(dyn_img.clone(), qr_area, Resize::Fit(None)) {
+        match picker.new_protocol(dyn_img.clone(), qr_area.into(), Resize::Fit(None)) {
             Ok(protocol) => {
                 let img = ratatui_image::Image::new(&protocol);
                 frame.render_widget(img, qr_area);

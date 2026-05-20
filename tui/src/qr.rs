@@ -136,7 +136,7 @@ pub fn render_qr_image(
 
     match graphics
         .picker
-        .new_protocol(dyn_img, area, Resize::Fit(None))
+        .new_protocol(dyn_img, area.into(), Resize::Fit(None))
     {
         Ok(protocol) => {
             let widget = ratatui_image::Image::new(&protocol);

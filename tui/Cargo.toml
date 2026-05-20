@@ -29,7 +29,7 @@ qrcode = "0.14"
 arboard = "3"
 open = "5"
 image = { version = "0.25", default-features = false, features = ["png"] }
-ratatui-image = { version = "10", default-features = false, features = ["crossterm", "image-defaults"] }
+ratatui-image = { version = "11", default-features = false, features = ["crossterm", "image-defaults"] }
 zxcvbn = "3"
 directories = "6"
 getrandom = "0.2"
