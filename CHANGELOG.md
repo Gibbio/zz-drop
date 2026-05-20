@@ -13,6 +13,15 @@ surfaces frozen on the road to 1.0 are listed in
 
 ## [Unreleased]
 
+## [0.9.4] — 2026-05-20
+
+Polish release on the 0.9.x stabilisation track. One focused
+change: zz-drop's outbound HTTPS now uses the operating system
+trust store, so the CLI works behind corporate TLS-inspection
+proxies and against self-hosted providers whose chain ends at a
+system-installed CA. Landed pre-G1 so the trust-set claim on the
+public security page lines up with the binary at 1.0.0.
+
 ### Changed
 
 - **TLS trust set: operating system trust store, not the embedded
