@@ -13,6 +13,19 @@ surfaces frozen on the road to 1.0 are listed in
 
 ## [Unreleased]
 
+### Fixed
+
+- `zz <TAB>` now triggers SACS from a fresh shell on bash systems
+  with the `bash-completion` framework loaded. The framework
+  lazy-loads completion files by command name, and only the
+  `zz-drop` file existed on disk, so the `complete -F … zz`
+  binding inside it was never registered for the `zz` alias.
+  `--setup-completions` now also drops a `zz` alias next to
+  `zz-drop` (relative symlink where supported, copy otherwise);
+  the symmetric fix lands for fish (`zz-drop.fish` alongside
+  `zz.fish`). Zsh was already correct via `#compdef zz zz-drop`.
+  `--setup-completions --uninstall` removes the alias too.
+
 ## [0.9.5] — 2026-05-20
 
 Maintenance release on the 0.9.x stabilisation track. No new

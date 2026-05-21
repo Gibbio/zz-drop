@@ -55,14 +55,25 @@ even if it was written by an older binary.
 
 ### Where files land
 
-| Shell | Path |
-|---|---|
-| bash | `${XDG_DATA_HOME:-~/.local/share}/bash-completion/completions/zz-drop` |
-| zsh  | `${ZDOTDIR:-~}/.zfunc/_zz` |
-| fish | `${XDG_CONFIG_HOME:-~/.config}/fish/completions/zz.fish` |
+| Shell | Primary path | Alias file |
+|---|---|---|
+| bash | `${XDG_DATA_HOME:-~/.local/share}/bash-completion/completions/zz-drop` | `…/completions/zz` |
+| zsh  | `${ZDOTDIR:-~}/.zfunc/_zz` | — |
+| fish | `${XDG_CONFIG_HOME:-~/.config}/fish/completions/zz.fish` | `…/completions/zz-drop.fish` |
 
-Each script registers completion for both `zz` and `zz-drop` so it
-works the same regardless of which name the operator invokes.
+Bash and fish lazy-load their completion files **by command name**
+(`bash-completion/completions/<cmd>`,
+`fish/completions/<cmd>.fish`). A single file named `zz-drop`
+would never be found when the operator types `zz <TAB>` from a
+fresh shell, and vice versa. So `--setup-completions` drops the
+alias file next to the primary — a relative symlink where the
+platform supports it (`zz → zz-drop`, `zz-drop.fish → zz.fish`),
+a plain copy where symlinks aren't available. `--setup-completions
+--uninstall` removes both.
+
+Zsh handles this natively: the `#compdef zz zz-drop` line at the
+top of `_zz` tells `compinit` to autoload the same completer for
+both names, so no alias file is needed.
 
 ### Install-path matrix
 

@@ -165,14 +165,26 @@ pub enum CompletionError {
 /// Idempotent: a second call with the same script content is a
 /// no-op for both filesystem ops. A call with different content
 /// updates both in place.
+///
+/// Bash and fish lazy-load by command name, so the primary file
+/// alone wouldn't serve `zz <TAB>` when the file is named
+/// `zz-drop` (and vice versa). For those shells we also drop one
+/// or more alias files next to the primary — symlink where the
+/// platform supports it, copy as a fallback. See
+/// `paths::completion_aliases`.
 pub fn install(req: &InstallRequest<'_>) -> Result<InstallOutcome, CompletionError> {
-    let completion_path = paths::completion_file(req.shell, &req.home, &paths::Env {
+    let env = paths::Env {
         xdg_data_home: req.xdg_data_home.clone(),
         zdotdir: req.zdotdir.clone(),
         xdg_config_home: req.xdg_config_home.clone(),
-    });
+    };
+    let completion_path = paths::completion_file(req.shell, &req.home, &env);
 
     let completion_action = write_completion_file(&completion_path, req.script)?;
+
+    for alias in paths::completion_aliases(req.shell, &req.home, &env) {
+        write_alias_file(&alias, &completion_path, req.script)?;
+    }
 
     let framework = match req.shell {
         Shell::Zsh => framework::detect_zsh(&zshrc_path(&req.home, req.zdotdir.as_deref())),
@@ -266,19 +278,28 @@ pub fn status(req: &InstallRequest<'_>) -> Status {
 /// preserving everything outside the markers) and delete the
 /// completion script file. Either op is a no-op when its target
 /// is already absent.
+///
+/// Also removes the bash/fish alias files written by `install`.
 pub fn uninstall(req: &InstallRequest<'_>) -> Result<UninstallOutcome, CompletionError> {
-    let completion_path = paths::completion_file(req.shell, &req.home, &paths::Env {
+    let env = paths::Env {
         xdg_data_home: req.xdg_data_home.clone(),
         zdotdir: req.zdotdir.clone(),
         xdg_config_home: req.xdg_config_home.clone(),
-    });
+    };
+    let completion_path = paths::completion_file(req.shell, &req.home, &env);
 
-    let file_removed = if completion_path.exists() {
+    let file_removed = if path_present(&completion_path) {
         fs::remove_file(&completion_path)?;
         true
     } else {
         false
     };
+
+    for alias in paths::completion_aliases(req.shell, &req.home, &env) {
+        if path_present(&alias) {
+            fs::remove_file(&alias)?;
+        }
+    }
 
     let rc_path = match req.shell {
         Shell::Fish => None,
@@ -325,6 +346,67 @@ fn write_completion_file(path: &Path, script: &str) -> Result<FileAction, Comple
         fs::write(path, script)?;
         Ok(FileAction::Created)
     }
+}
+
+/// Place an alias next to the primary completion file so the
+/// shell's lazy-loader picks up the other command name. Tries a
+/// relative symlink first (cheap, self-updating); falls back to a
+/// plain copy of the script when symlinks aren't available
+/// (Windows without dev-mode, exotic filesystems).
+///
+/// Idempotent: an existing symlink pointing at the correct target
+/// is left alone; an existing file with the correct content is
+/// left alone; anything else is replaced.
+fn write_alias_file(
+    alias: &Path,
+    primary: &Path,
+    script: &str,
+) -> Result<(), CompletionError> {
+    if let Some(parent) = alias.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let primary_name = primary
+        .file_name()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| primary.to_path_buf());
+
+    if let Ok(existing_target) = fs::read_link(alias) {
+        if existing_target == primary_name {
+            return Ok(());
+        }
+        fs::remove_file(alias)?;
+    } else if alias.exists() {
+        let existing = fs::read_to_string(alias).unwrap_or_default();
+        if existing == script {
+            return Ok(());
+        }
+        fs::remove_file(alias)?;
+    }
+
+    #[cfg(unix)]
+    {
+        if std::os::unix::fs::symlink(&primary_name, alias).is_ok() {
+            return Ok(());
+        }
+    }
+    #[cfg(windows)]
+    {
+        if std::os::windows::fs::symlink_file(&primary_name, alias).is_ok() {
+            return Ok(());
+        }
+    }
+
+    fs::write(alias, script)?;
+    Ok(())
+}
+
+/// Treat a dangling symlink as "present" — `Path::exists` follows
+/// symlinks and returns false when the target is missing, which
+/// would leak stale alias files past uninstall on systems where
+/// the primary was already gone.
+fn path_present(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok()
 }
 
 fn bashrc_path(home: &Path) -> PathBuf {
@@ -546,5 +628,104 @@ mod tests {
         assert_eq!(shell_quote("/home/user/.zfunc"), "\"/home/user/.zfunc\"");
         assert_eq!(shell_quote("a$b"), "\"a\\$b\"");
         assert_eq!(shell_quote("with\"quote"), "\"with\\\"quote\"");
+    }
+
+    #[test]
+    fn install_bash_creates_alias_for_zz() {
+        let home = tmp_home();
+        let req = req(Shell::Bash, &home, "# bash completion v1\n");
+        let _ = install(&req).unwrap();
+
+        let primary = home.join(".local/share/bash-completion/completions/zz-drop");
+        let alias = home.join(".local/share/bash-completion/completions/zz");
+        assert!(path_present(&primary), "primary not written: {primary:?}");
+        assert!(path_present(&alias), "alias not written: {alias:?}");
+
+        // Either a relative symlink or a copy is acceptable.
+        if let Ok(target) = fs::read_link(&alias) {
+            assert_eq!(target, PathBuf::from("zz-drop"));
+        } else {
+            let body = fs::read_to_string(&alias).unwrap();
+            assert!(body.contains("bash completion v1"));
+        }
+    }
+
+    #[test]
+    fn install_fish_creates_alias_for_zz_drop() {
+        let home = tmp_home();
+        let req = req(Shell::Fish, &home, "# fish completion v1\n");
+        let _ = install(&req).unwrap();
+
+        let primary = home.join(".config/fish/completions/zz.fish");
+        let alias = home.join(".config/fish/completions/zz-drop.fish");
+        assert!(path_present(&primary));
+        assert!(path_present(&alias));
+
+        if let Ok(target) = fs::read_link(&alias) {
+            assert_eq!(target, PathBuf::from("zz.fish"));
+        } else {
+            let body = fs::read_to_string(&alias).unwrap();
+            assert!(body.contains("fish completion v1"));
+        }
+    }
+
+    #[test]
+    fn install_zsh_writes_no_alias_file() {
+        let home = tmp_home();
+        let req = req(Shell::Zsh, &home, "# zsh\n");
+        let _ = install(&req).unwrap();
+        // .zfunc/_zz handles both names via the script's #compdef.
+        let listing: Vec<_> = fs::read_dir(home.join(".zfunc"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(listing.len(), 1);
+        assert_eq!(listing[0], std::ffi::OsString::from("_zz"));
+    }
+
+    #[test]
+    fn install_alias_is_idempotent_across_runs() {
+        let home = tmp_home();
+        let req = req(Shell::Bash, &home, "# bash v1\n");
+        let _ = install(&req).unwrap();
+        // Second run with identical content must not error and
+        // must leave the alias in place.
+        let _ = install(&req).unwrap();
+        let alias = home.join(".local/share/bash-completion/completions/zz");
+        assert!(path_present(&alias));
+    }
+
+    #[test]
+    fn install_alias_recovers_from_stale_content() {
+        let home = tmp_home();
+        let alias = home.join(".local/share/bash-completion/completions/zz");
+        fs::create_dir_all(alias.parent().unwrap()).unwrap();
+        fs::write(&alias, "# stale unrelated content\n").unwrap();
+
+        let req = req(Shell::Bash, &home, "# bash v1\n");
+        let _ = install(&req).unwrap();
+
+        // Stale plain-file content must be replaced so `zz <TAB>`
+        // actually loads the new completer.
+        if let Ok(target) = fs::read_link(&alias) {
+            assert_eq!(target, PathBuf::from("zz-drop"));
+        } else {
+            let body = fs::read_to_string(&alias).unwrap();
+            assert!(!body.contains("stale unrelated content"));
+            assert!(body.contains("bash v1"));
+        }
+    }
+
+    #[test]
+    fn uninstall_removes_alias_too() {
+        let home = tmp_home();
+        let req = req(Shell::Bash, &home, "# bash\n");
+        let _ = install(&req).unwrap();
+        let alias = home.join(".local/share/bash-completion/completions/zz");
+        assert!(path_present(&alias));
+
+        let _ = uninstall(&req).unwrap();
+        assert!(!path_present(&alias), "alias not removed on uninstall");
     }
 }
