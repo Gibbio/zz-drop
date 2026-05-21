@@ -1,6 +1,6 @@
 [package]
 name = "zz-drop-tui"
-version = "0.9.5"
+version = "0.9.6"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Ratatui-based setup and configuration UI for zz-drop"

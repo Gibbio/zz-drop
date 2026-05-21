@@ -13,18 +13,34 @@ surfaces frozen on the road to 1.0 are listed in
 
 ## [Unreleased]
 
+## [0.9.6] — 2026-05-21
+
+Fix release on the 0.9.x stabilisation track. Restores
+`zz <TAB>` completion on bash and fish systems where the
+shell's completion framework lazy-loads files by command name
+— previously only `zz-drop <TAB>` actually triggered SACS.
+Symmetric brew-side patch lands in the tap formula via the
+release workflow.
+
 ### Fixed
 
-- `zz <TAB>` now triggers SACS from a fresh shell on bash systems
-  with the `bash-completion` framework loaded. The framework
-  lazy-loads completion files by command name, and only the
-  `zz-drop` file existed on disk, so the `complete -F … zz`
-  binding inside it was never registered for the `zz` alias.
-  `--setup-completions` now also drops a `zz` alias next to
-  `zz-drop` (relative symlink where supported, copy otherwise);
-  the symmetric fix lands for fish (`zz-drop.fish` alongside
-  `zz.fish`). Zsh was already correct via `#compdef zz zz-drop`.
-  `--setup-completions --uninstall` removes the alias too.
+- `zz <TAB>` now triggers SACS from a fresh shell on bash
+  systems with the `bash-completion` framework loaded. The
+  framework lazy-loads completion files by command name, and
+  only the `zz-drop` file existed on disk, so the
+  `complete -F … zz` binding inside it was never registered
+  for the `zz` alias. `--setup-completions` now also drops a
+  `zz` alias next to `zz-drop` (relative symlink where
+  supported, copy otherwise); the symmetric fix lands for fish
+  (`zz-drop.fish` alongside `zz.fish`). Zsh was already correct
+  via `#compdef zz zz-drop`. `--setup-completions --uninstall`
+  removes the alias too.
+- **Homebrew formula** carries the same alias pair in the
+  cellar: `share/bash-completion/completions/zz → zz-drop` and
+  `share/fish/vendor_completions.d/zz.fish → zz-drop.fish`.
+  Injected post-publish by the `patch-formula` workflow next to
+  the existing `generate_completions_from_executable` call.
+  `brew uninstall` reverses both.
 
 ## [0.9.5] — 2026-05-20
 
