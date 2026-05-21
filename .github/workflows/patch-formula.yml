@@ -94,6 +94,32 @@ jobs:
           else:
               print("completions already wired")
 
+          # Bash and fish lazy-load completion files by command
+          # name. `generate_completions_from_executable` writes a
+          # single file named after the binary (`zz-drop` /
+          # `zz-drop.fish`); without a sibling named after the
+          # `zz` alias, typing `zz <TAB>` on a system with
+          # bash-completion@2 loaded would never find a completer.
+          # Drop relative symlinks in the same cellar dirs so both
+          # names resolve. Zsh is covered by the `#compdef zz
+          # zz-drop` directive at the top of the script.
+          alias_anchor = insertion.strip("\n") + "\n"
+          alias_insertion = (
+              "    (bash_completion/\"zz\").make_symlink \"zz-drop\"\n"
+              "    (fish_completion/\"zz.fish\").make_symlink \"zz-drop.fish\"\n"
+          )
+          alias_done = "(bash_completion/\"zz\").make_symlink" in src
+          if not alias_done:
+              if alias_anchor not in src:
+                  sys.exit(
+                      f"FATAL: alias anchor not found: {alias_anchor!r}. "
+                      "completions insertion form may have drifted."
+                  )
+              src = src.replace(alias_anchor, alias_anchor + alias_insertion, 1)
+              print("patched: bash/fish completion aliases wired")
+          else:
+              print("completion aliases already wired")
+
           # `def caveats` — surfaced by `brew install` and
           # `brew info`. Tells the operator how to make the
           # shell-completion files (which brew already wrote)
