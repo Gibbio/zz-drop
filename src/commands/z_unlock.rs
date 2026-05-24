@@ -25,6 +25,8 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
+use zeroize::Zeroizing;
+
 use zz_drop_core::AgentResponse;
 use zz_drop_core::config::Paths;
 use zz_drop_core::diag_log;
@@ -80,11 +82,11 @@ fn scriptable() -> bool {
 /// when supplied, otherwise prompt interactively. In scriptable
 /// mode a missing flag is a hard error — we never prompt under
 /// `--json`/`--quiet`.
-fn obtain_passphrase(label: &str) -> Result<String, i32> {
+fn obtain_passphrase(label: &str) -> Result<Zeroizing<String>, i32> {
     if let Some(path) = runtime::flags().passphrase_file.clone() {
         let uid = crate::config::current_uid();
         match pp::read_passphrase_file(&path, uid) {
-            Ok(s) => return Ok(s),
+            Ok(s) => return Ok(Zeroizing::new(s)),
             Err(e) => {
                 let exit = if e.is_insecure() {
                     EXIT_PASSPHRASE_FILE_INSECURE
@@ -114,7 +116,7 @@ fn obtain_passphrase(label: &str) -> Result<String, i32> {
     }
 
     match prompt_passphrase(label) {
-        Ok(p) => Ok(p),
+        Ok(p) => Ok(Zeroizing::new(p)),
         Err(e) => {
             output::emit_failed_bare(Reason::Usage, Some(&format!("could not read passphrase: {e}")));
             Err(EXIT_USAGE)

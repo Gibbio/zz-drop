@@ -65,6 +65,47 @@ impl fmt::Debug for DropboxAuth {
     }
 }
 
+/// Wipe the OAuth tokens from memory when this struct is dropped, so
+/// that locking the agent (or dropping any transient clone of the
+/// decrypted profile) does not leave token bytes lingering in freed
+/// heap / swap. The fields stay `String` so the on-disk CBOR format and
+/// every call site are unchanged. See security audit F2.
+impl Drop for DropboxAuth {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.access_token.zeroize();
+        self.refresh_token.zeroize();
+    }
+}
+
 /// Refresh tokens before this many seconds remain on the access
 /// token, to avoid edge-of-window 401s mid-upload.
 pub const EXPIRY_SKEW_SECS: u64 = 60;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Guard: the zeroize-on-drop `Drop` impl must coexist with the
+    /// derived `Clone` / `PartialEq` and round-trip through CBOR
+    /// unchanged (the on-disk format must not shift). Representative for
+    /// all four `*Auth` types, which share the same pattern.
+    #[test]
+    fn auth_clone_eq_and_cbor_roundtrip_survive_drop_impl() {
+        let a = DropboxAuth {
+            access_token: "at".into(),
+            refresh_token: "rt".into(),
+            token_type: "bearer".into(),
+            expires_at: 123,
+            scope: "files".into(),
+        };
+        let b = a.clone();
+        assert_eq!(a, b);
+
+        let mut buf = Vec::new();
+        ciborium::into_writer(&a, &mut buf).unwrap();
+        let back: DropboxAuth = ciborium::from_reader(buf.as_slice()).unwrap();
+        assert_eq!(a, back);
+        // a, b, back all drop here → Drop (zeroize) runs without panic.
+    }
+}

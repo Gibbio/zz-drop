@@ -31,3 +31,15 @@ impl fmt::Debug for NextcloudAuth {
         }
     }
 }
+
+/// Wipe the app-password / login-flow token from memory on drop (see
+/// security audit F2). The field stays `String`, so the on-disk CBOR
+/// format and call sites are unchanged; only the freed buffer is zeroed.
+impl Drop for NextcloudAuth {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        match self {
+            Self::AppPassword { secret } | Self::LoginFlowToken { secret } => secret.zeroize(),
+        }
+    }
+}

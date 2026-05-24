@@ -61,6 +61,17 @@ impl fmt::Debug for OneDriveAuth {
     }
 }
 
+/// Wipe the OAuth tokens from memory on drop (see security audit F2).
+/// Fields stay `String`, so the on-disk CBOR format and call sites are
+/// unchanged; only the freed buffers are zeroed.
+impl Drop for OneDriveAuth {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.access_token.zeroize();
+        self.refresh_token.zeroize();
+    }
+}
+
 /// Refresh tokens before this many seconds remain on the access
 /// token, to avoid edge-of-window 401s mid-upload.
 pub const EXPIRY_SKEW_SECS: u64 = 60;

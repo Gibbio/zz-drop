@@ -111,11 +111,14 @@ behind a `Mutex`. The agent never persists the profile. The provider
 credentials (Nextcloud app password, OAuth token) are only present in
 the encrypted `profile.zz` and in the agent's RAM when unlocked.
 
-Note: in this milestone the in-RAM `PlainProfile` is a plain Rust
-struct. Its `String` fields are not zeroized in place when the agent
-locks: locking drops them and process exit returns the pages to the
-OS. A future task may replace the affected fields with explicit
-`Zeroizing` wrappers.
+Note: the provider **auth secrets** (OAuth access/refresh tokens,
+Nextcloud app-password / login-flow token) are zeroized in place when
+their struct is dropped — locking the agent, dropping a transient clone,
+or process exit all wipe the token bytes from the freed buffer (see
+`*Auth` `Drop` impls; security audit F2). The non-secret `PlainProfile`
+fields (alias, server URL, folder names) remain plain `String`s and are
+not wiped — they carry no credential. The unlock passphrase is held in a
+`Zeroizing<String>` for the duration of the unlock and wiped afterward.
 
 ## SACS endpoints — `LIST_REMOTE` and `INVALIDATE_REMOTE`
 
