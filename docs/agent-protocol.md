@@ -14,7 +14,9 @@ Token file:
 - 32 random bytes
 - 0600 permissions
 
-Directory permissions: 0700.
+Directory permissions: 0700. The socket and token/lock files are
+created with mode `0600` in a single `open` (no write-then-chmod
+window); the socket is additionally `chmod`ed to `0600` after `bind`.
 
 ## Security
 

@@ -31,10 +31,19 @@ pub fn generate_token() -> [u8; TOKEN_LEN] {
 }
 
 pub fn write_token_file(path: &Path, token: &[u8; TOKEN_LEN]) -> Result<(), SecurityError> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::write(path, token).map_err(|e| SecurityError::Io(e.to_string()))?;
-    let perms = std::fs::Permissions::from_mode(0o600);
-    std::fs::set_permissions(path, perms).map_err(|e| SecurityError::Io(e.to_string()))?;
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    // Create with mode 0600 in one step — no write-then-chmod window (F4).
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| SecurityError::Io(e.to_string()))?;
+    f.write_all(token).map_err(|e| SecurityError::Io(e.to_string()))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|e| SecurityError::Io(e.to_string()))?;
     Ok(())
 }
 

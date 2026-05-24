@@ -195,16 +195,7 @@ pub fn save_profile_zz_with_config(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|_| ProfileCryptoError::Io)?;
     }
-    std::fs::write(path, envelope).map_err(|_| ProfileCryptoError::Io)?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(path, perms).map_err(|_| ProfileCryptoError::Io)?;
-    }
-
-    Ok(())
+    write_private(path, envelope.as_bytes())
 }
 
 /// Read `profile.zz` from disk and decrypt it with `passphrase`.
@@ -396,13 +387,32 @@ fn write_envelope(path: &Path, envelope: &str) -> Result<(), ProfileCryptoError>
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|_| ProfileCryptoError::Io)?;
     }
-    std::fs::write(path, envelope).map_err(|_| ProfileCryptoError::Io)?;
+    write_private(path, envelope.as_bytes())
+}
 
+/// Write `data` to `path`, creating the file with mode `0600` in a
+/// single `open` so it is never momentarily world-readable — closing
+/// the write-then-chmod window (audit F4). A pre-existing file keeps its
+/// inode but is re-tightened to `0600` as defense in depth.
+fn write_private(path: &Path, data: &[u8]) -> Result<(), ProfileCryptoError> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(path, perms).map_err(|_| ProfileCryptoError::Io)?;
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|_| ProfileCryptoError::Io)?;
+        f.write_all(data).map_err(|_| ProfileCryptoError::Io)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|_| ProfileCryptoError::Io)?;
+        Ok(())
     }
-    Ok(())
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, data).map_err(|_| ProfileCryptoError::Io)
+    }
 }

@@ -90,6 +90,15 @@ pub fn run(config: ServerConfig) -> Result<(), ServerError> {
 
     let listener = UnixListener::bind(&config.paths.agent_socket)
         .map_err(|e| ServerError::Bind(e.to_string()))?;
+    // Tighten the socket to 0600. The runtime dir is already 0700 and
+    // verified ours (D1), so this is defense in depth (F4).
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(
+            &config.paths.agent_socket,
+            std::fs::Permissions::from_mode(0o600),
+        );
+    }
     listener
         .set_nonblocking(true)
         .map_err(|e| ServerError::Io(e.to_string()))?;

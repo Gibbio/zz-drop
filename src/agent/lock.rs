@@ -58,11 +58,24 @@ pub fn lock_path(runtime_dir: &Path) -> std::path::PathBuf {
 /// in place.
 pub fn write_lock(runtime_dir: &Path, pid: u32, build_id: &str) -> io::Result<()> {
     let path = lock_path(runtime_dir);
-    fs::write(&path, format!("{pid}\n{build_id}\n"))?;
+    let contents = format!("{pid}\n{build_id}\n");
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        // Create with mode 0600 in one step — no write-then-chmod window (F4).
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(LOCK_MODE)
+            .open(&path)?;
+        f.write_all(contents.as_bytes())?;
         fs::set_permissions(&path, fs::Permissions::from_mode(LOCK_MODE))?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(&path, contents)?;
     }
     Ok(())
 }
