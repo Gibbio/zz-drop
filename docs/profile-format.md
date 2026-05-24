@@ -85,6 +85,23 @@ caches it between operations within a session.
 - KDF parameters stored in envelope.
 - No recovery if profile decrypt passphrase is lost.
 
+### KDF parameter bounds
+
+The KDF parameters live in the cleartext envelope header (outside the
+AEAD), so on a supplied or server-served container they are
+attacker-controlled. Before deriving a key, zz-drop rejects parameters
+outside a sane band so a hostile header cannot trigger a multi-GB
+allocation (OOM) or a runaway iteration count (CPU time-bomb):
+
+- `memory_kib` ≤ 2 GiB (`Argon2idConfig::MAX_MEMORY_KIB`)
+- `iterations` ∈ `[1, 16]`
+- `parallelism` ∈ `[1, 8]`
+
+There is intentionally **no lower bound on `memory_kib`**: a legitimately
+weak older container must still decrypt so KDF rotation can upgrade it.
+Out-of-band parameters fail fast with `ProfileCryptoError::Kdf`,
+independent of the passphrase (no decrypt oracle).
+
 ## KDF rotation
 
 The envelope stores the Argon2id parameters that were used to
