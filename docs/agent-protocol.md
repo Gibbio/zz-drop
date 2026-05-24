@@ -22,8 +22,16 @@ Each connection must pass:
 
 1. peer UID credential check
    - Linux: `SO_PEERCRED`
-   - macOS/BSD: `getpeereid()`
+   - macOS/BSD: `getpeereid()` / `LOCAL_PEERCRED`
 2. token check
+
+The check is **mutual**. Before sending the token, the client validates
+the runtime dir (real directory, owned by the current UID, mode `0700`)
+and reads the *agent's* peer UID, refusing to proceed unless it equals
+its own EUID. This prevents a rogue agent — squatting the socket path in
+a world-writable runtime dir (`/tmp/zz-drop-$UID` on macOS / XDG-less
+Linux) under a different UID — from ever receiving the token or an
+`Unlock` payload. See `docs/agent.md` → "Mutual checks".
 
 ## Framing
 

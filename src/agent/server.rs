@@ -7,7 +7,7 @@ use zz_drop_core::agent_proto::{
     AgentRequest, AgentResponse, decode_request_body, encode_response_body, read_frame,
     write_frame,
 };
-use zz_drop_core::config::{Paths, ensure_dir};
+use zz_drop_core::config::{Paths, ensure_dir, verify_private_dir};
 
 use super::security::{
     TOKEN_LEN, check_peer_uid, current_euid, generate_token, token_matches, write_token_file,
@@ -66,6 +66,12 @@ pub fn run(config: ServerConfig) -> Result<(), ServerError> {
     }
 
     ensure_dir(&config.paths.runtime_dir, 0o700).map_err(|e| ServerError::Io(e.to_string()))?;
+    // The runtime dir holds the socket + token. On macOS / XDG-less Linux it
+    // lives under the world-writable `/tmp`; refuse to bind if it is not a real
+    // directory owned by us with mode 0700 (another local user must not be able
+    // to pre-create it and observe or hijack the socket/token).
+    verify_private_dir(&config.paths.runtime_dir, current_euid())
+        .map_err(|e| ServerError::Security(e.to_string()))?;
     ensure_dir(&config.paths.cache_dir, 0o700).map_err(|e| ServerError::Io(e.to_string()))?;
 
     zz_drop_core::diag_log::init(config.paths.debug_log_file(), "zz-agent");

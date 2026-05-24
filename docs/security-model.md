@@ -35,7 +35,14 @@ leaves the device.
   fallback at `/tmp/zz-drop-$UID/agent.sock`. Directory permissions 0700.
 - Token file with 0600 permissions, 32 random bytes.
 - Per-connection peer UID credential check (`SO_PEERCRED` on Linux,
-  `getpeereid()` on macOS/BSD).
+  `getpeereid()` / `LOCAL_PEERCRED` on macOS/BSD). The check is
+  **mutual**: the agent authenticates the client, and the client
+  authenticates the agent (it verifies the agent's peer UID equals its
+  own EUID, and that the runtime dir is a non-symlink directory owned by
+  the current UID with mode 0700, before sending the token or any
+  `Unlock`). This protects against a different local user squatting the
+  socket path in the world-writable `/tmp/zz-drop-$UID` runtime dir used
+  on macOS and XDG-less Linux.
 - Decrypted `PlainProfile` lives in RAM only.
 - `zz q` clears RAM immediately.
 - Automatic lock after `unlock_ttl_secs = 600` (10 minutes).

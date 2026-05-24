@@ -38,6 +38,31 @@ Each connection must pass two checks:
    closed before any protocol message is processed.
 
 After both pass, the protocol from
+
+### Mutual checks: the client also authenticates the agent
+
+The socket lives in the runtime dir, which on macOS (and on Linux when
+`$XDG_RUNTIME_DIR` is unset) sits under the world-writable, sticky
+`/tmp`. To stop a *different* local user from pre-creating that directory
+and standing up a rogue agent that would receive an `Unlock` (and with it
+the KEK and the whole decrypted profile), the **client** performs two
+checks of its own before any secret leaves the process:
+
+1. **Runtime-dir validation** — the directory holding the socket + token
+   must be a real directory (not a symlink), owned by the current UID,
+   with mode `0700` (no group/other bits). Enforced by
+   `zz_drop_core::config::verify_private_dir`, called by both the agent
+   (before `bind`) and every client (before `connect` sends anything).
+2. **Server peer-UID check** — after `connect`, the client reads the
+   *agent's* peer UID (`SO_PEERCRED` / `LOCAL_PEERCRED`) and aborts unless
+   it equals the client's own EUID. A cross-UID attacker cannot run a
+   process under the victim's UID, so a foreign agent can never receive
+   the token or the `Unlock` payload.
+
+The peer-UID check is therefore **mutual**: server authenticates client,
+and client authenticates server.
+
+The protocol from
 [`agent-protocol.md`](./agent-protocol.md)
 is used: postcard payload, 4-byte big-endian length prefix, 1 MiB frame
 limit, version `1`.

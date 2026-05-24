@@ -219,6 +219,45 @@ pub fn ensure_dir(path: &Path, mode: u32) -> Result<(), PathError> {
     Ok(())
 }
 
+/// Verify that `path` is a directory we exclusively control: a real directory
+/// (not a symlink), owned by `uid`, with **no** group/other permission bits set
+/// (mode `0700` or stricter).
+///
+/// The agent socket and token file live in the runtime dir, which on macOS and
+/// XDG-less Linux sits under the world-writable, sticky `/tmp`. Before a client
+/// trusts a socket/token found there — or before the agent binds — we confirm
+/// that another local user did not pre-create the directory and plant a
+/// malicious socket. `symlink_metadata` is used so a planted symlink cannot
+/// redirect the check to a directory the attacker controls. See `docs/agent.md`.
+#[cfg(unix)]
+pub fn verify_private_dir(path: &Path, uid: u32) -> Result<(), PathError> {
+    use std::os::unix::fs::MetadataExt;
+
+    let meta = std::fs::symlink_metadata(path).map_err(|e| PathError::Io(e.to_string()))?;
+    if !meta.is_dir() {
+        return Err(PathError::Io(format!(
+            "{} is not a directory; refusing to use it for the agent socket",
+            path.display()
+        )));
+    }
+    if meta.uid() != uid {
+        return Err(PathError::Io(format!(
+            "{} is owned by uid {} (expected {}); refusing",
+            path.display(),
+            meta.uid(),
+            uid
+        )));
+    }
+    if meta.mode() & 0o077 != 0 {
+        return Err(PathError::Io(format!(
+            "{} has group/other permission bits (mode 0{:o}); refusing",
+            path.display(),
+            meta.mode() & 0o777
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,6 +358,68 @@ mod tests {
         ensure_dir(&target, 0o700).unwrap();
         let mode = std::fs::metadata(&target).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o700);
+    }
+
+    /// Current euid, read from the owner of a file we just created
+    /// (avoids a `rustix`/`libc` dependency in this crate's tests).
+    #[cfg(unix)]
+    fn own_uid(tmp: &Path) -> u32 {
+        use std::os::unix::fs::MetadataExt;
+        let probe = tmp.join(".uid-probe");
+        std::fs::write(&probe, b"").unwrap();
+        std::fs::metadata(&probe).unwrap().uid()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verify_private_dir_accepts_own_0700_dir() {
+        let tmp = tempdir().unwrap();
+        let uid = own_uid(tmp.path());
+        let dir = tmp.path().join("rt");
+        ensure_dir(&dir, 0o700).unwrap();
+        assert!(verify_private_dir(&dir, uid).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verify_private_dir_rejects_group_or_other_bits() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempdir().unwrap();
+        let uid = own_uid(tmp.path());
+        let dir = tmp.path().join("rt");
+        ensure_dir(&dir, 0o700).unwrap();
+        // World-writable: exactly the /tmp-squat shape we must refuse.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(verify_private_dir(&dir, uid).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verify_private_dir_rejects_non_directory_and_symlink() {
+        let tmp = tempdir().unwrap();
+        let uid = own_uid(tmp.path());
+        // A regular file where a directory is expected.
+        let file = tmp.path().join("not-a-dir");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(verify_private_dir(&file, uid).is_err());
+        // A symlink to a (valid) dir must be refused without following it.
+        let real = tmp.path().join("real");
+        ensure_dir(&real, 0o700).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(verify_private_dir(&link, uid).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verify_private_dir_rejects_wrong_owner() {
+        // We cannot chown without root, but we can assert a uid that is
+        // definitely not the owner is rejected.
+        let tmp = tempdir().unwrap();
+        let uid = own_uid(tmp.path());
+        let dir = tmp.path().join("rt");
+        ensure_dir(&dir, 0o700).unwrap();
+        assert!(verify_private_dir(&dir, uid.wrapping_add(99_999)).is_err());
     }
 
     // ---- ZZ_CONFIG_DIR ------------------------------------------------
