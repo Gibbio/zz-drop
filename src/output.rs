@@ -17,6 +17,19 @@ pub fn err_line(text: &str) {
     eprintln!("{text}");
 }
 
+/// Replace C0/C1 control characters (including ESC `0x1b`) with the
+/// Unicode replacement char before a string reaches the terminal.
+/// Cloud-supplied filenames can embed ANSI escape sequences that would
+/// otherwise move the cursor, retitle the window, clear the screen, or
+/// (on some terminals) inject input. Applied only on the human-facing
+/// Text/Quiet paths — `Json` output is left untouched because `serde`
+/// already escapes control characters into `\uXXXX`. See audit D8.
+fn term_safe(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_control() { '\u{fffd}' } else { c })
+        .collect()
+}
+
 // --------------------------------------------------------------------
 // Mode-aware emitters
 // --------------------------------------------------------------------
@@ -64,9 +77,9 @@ pub fn emit_uploaded(
     match runtime::flags().output {
         OutputMode::Text => {
             let size = human_size(bytes);
-            line(&render_uploaded(name, &size, compressed_pct, scope, color));
+            line(&render_uploaded(&term_safe(name), &size, compressed_pct, scope, color));
         }
-        OutputMode::Quiet => line(name),
+        OutputMode::Quiet => line(&term_safe(name)),
         OutputMode::Json => write_json_line(&jsonev::Uploaded::new(
             name,
             bytes,
@@ -82,9 +95,9 @@ pub fn emit_downloaded(name: &str, bytes: u64, scope: TargetLabel<'_>, color: &C
     match runtime::flags().output {
         OutputMode::Text => {
             let size = human_size(bytes);
-            line(&render_downloaded(name, &size, scope, color));
+            line(&render_downloaded(&term_safe(name), &size, scope, color));
         }
-        OutputMode::Quiet => line(name),
+        OutputMode::Quiet => line(&term_safe(name)),
         OutputMode::Json => write_json_line(&jsonev::Downloaded::new(
             name,
             bytes,
@@ -105,8 +118,13 @@ pub fn emit_failed_file(
     color: &ColorPolicy,
 ) {
     match runtime::flags().output {
-        OutputMode::Text => err_line(&render_failed(name, detail, Some(scope), color)),
-        OutputMode::Quiet => err_line(&format!("failed {name}: {detail}")),
+        OutputMode::Text => err_line(&render_failed(
+            &term_safe(name),
+            &term_safe(detail),
+            Some(scope),
+            color,
+        )),
+        OutputMode::Quiet => err_line(&format!("failed {}: {}", term_safe(name), term_safe(detail))),
         OutputMode::Json => write_json_line(&jsonev::Failed::for_file(
             name,
             reason,
