@@ -1,7 +1,9 @@
 //! Append-only diagnostic log shared by `zz-drop` (CLI + agent)
-//! and `zz-tui`. One file per uid, default on in release builds —
-//! turned off by `ZZ_DROP_DEBUG_LOG=0`. Rotated to `<file>.old` when
-//! it crosses 8 MiB so it never grows without bound.
+//! and `zz-tui`. One file per uid, **off by default** — opt in by
+//! setting `ZZ_DROP_DEBUG_LOG=1` (`on`/`true`/`yes` also accepted).
+//! This keeps the "no log file" guarantee true unless the operator
+//! explicitly turns diagnostics on. Rotated to `<file>.old` when it
+//! crosses 8 MiB so it never grows without bound.
 //!
 //! ## Strict no-secret rule
 //!
@@ -48,10 +50,10 @@ fn slot() -> &'static Mutex<Slot> {
     SLOT.get_or_init(|| Mutex::new(Slot::default()))
 }
 
-fn env_disables() -> bool {
+fn env_enables() -> bool {
     matches!(
         std::env::var("ZZ_DROP_DEBUG_LOG").as_deref(),
-        Ok("0") | Ok("off") | Ok("OFF") | Ok("false") | Ok("FALSE")
+        Ok("1") | Ok("on") | Ok("ON") | Ok("true") | Ok("TRUE") | Ok("yes") | Ok("YES")
     )
 }
 
@@ -64,7 +66,7 @@ pub fn init(path: PathBuf, binary: &'static str) {
     if s.path.is_some() {
         return;
     }
-    s.enabled = !env_disables();
+    s.enabled = env_enables();
     s.binary = binary;
     s.path = Some(path.clone());
     if !s.enabled {

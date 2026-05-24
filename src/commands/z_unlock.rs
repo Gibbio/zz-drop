@@ -428,7 +428,6 @@ fn unlock_local(paths: &Paths) -> i32 {
         Ok(p) => p,
         Err(code) => return code,
     };
-    diag_log::log(&format!("unlock_local prompt pass_len={}", passphrase.len()));
 
     let (profile_set, kek) = match decrypt_set(&envelope, &passphrase) {
         Ok(pair) => pair,
@@ -438,8 +437,7 @@ fn unlock_local(paths: &Paths) -> i32 {
                 Some("decryption failed (wrong passphrase or corrupted container)"),
             );
             diag_log::log(&format!(
-                "unlock_local decrypt_fail kind=Aead envelope_fnv={envelope_fnv:016x} pass_len={}",
-                passphrase.len()
+                "unlock_local decrypt_fail kind=Aead envelope_fnv={envelope_fnv:016x}"
             ));
             return EXIT_DECRYPT_FAILED;
         }

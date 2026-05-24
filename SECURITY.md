@@ -36,7 +36,10 @@ This repository's contribution to the project's security posture:
   + 32-byte token in a `0600` file, compared with
   `subtle::ConstantTimeEq`.
 - 10-minute TTL auto-lock + 5-minute locked-idle exit.
-- no log file; the agent never opens stdout/stderr.
+- no log file by default; the agent never opens stdout/stderr. An
+  opt-in diagnostic log (no secrets — paths/lengths/FNV fingerprints
+  only) is written under the cache dir only when `ZZ_DROP_DEBUG_LOG=1`
+  is set.
 - no telemetry, no analytics, no usage pings.
 - HTTPS to providers and to `zz-drop.net` uses **rustls with the
   operating system trust store** (Security.framework on macOS,

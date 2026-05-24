@@ -24,7 +24,10 @@ fn main() -> ExitCode {
     }
 
     init_diag_log("zz");
-    zz_drop_core::diag_log::log(&format!("invoke argv={:?}", args));
+    // Log only the argument count, never the raw argv: operands can be
+    // filenames / paths / alias names the operator may consider private,
+    // and the per-command emitters already record the verb + outcome.
+    zz_drop_core::diag_log::log(&format!("invoke argc={}", args.len()));
 
     // Strip global flags (`--json`, `--quiet`, `--passphrase-file`,
     // `--alias`, `--local`, `--remote`, `--yes`) from the front of

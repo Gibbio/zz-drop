@@ -99,8 +99,10 @@ The reference values are pinned in
 
 The agent itself never opens stdout / stderr (they are redirected to
 `/dev/null` at spawn). It writes nothing to disk except the socket and
-the token file. There is no log file. Diagnostic output for users is
-the responsibility of `zz f`, not of the agent.
+the token file. There is no log file by default; a diagnostic log
+(no secrets) is written under the cache dir only when the operator sets
+`ZZ_DROP_DEBUG_LOG=1`. Diagnostic output for users is the
+responsibility of `zz f`, not of the agent.
 
 ## Memory model
 
