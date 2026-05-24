@@ -50,7 +50,10 @@ This repository's contribution to the project's security posture:
   bundle of roots and ignore everything else, set
   `SSL_CERT_FILE=/path/to/roots.pem` before invoking zz-drop;
   only the PEM certificates in that file will be trusted for the
-  duration of the run.
+  duration of the run. If that variable is set but the file cannot
+  be read or contains no certificate, zz-drop **fails closed** (it
+  trusts nothing and every connection fails) rather than falling
+  back to the OS trust store.
 
 ## What you should know before deploying
 

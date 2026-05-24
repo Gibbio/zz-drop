@@ -92,6 +92,12 @@ become the **only** trusted roots for the run. This covers
 environments where a corporate CA is shipped as a `.pem` but
 cannot be installed system-wide.
 
+If `SSL_CERT_FILE` is **set but unusable** (unreadable, or it contains
+no certificate), zz-drop **fails closed**: it trusts an empty root set
+so every TLS handshake fails, rather than silently reverting to the
+system trust store the operator was trying to override. Unset the
+variable to use the OS trust store.
+
 ## Logging rules
 
 The following must never appear in logs:
