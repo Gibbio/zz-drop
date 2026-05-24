@@ -37,9 +37,17 @@ pub struct AgentOpts {
     pub allow_non_standard_methods: bool,
 }
 
+/// Default DNS-resolve and TCP-connect timeout applied alongside the
+/// global timeout. Bounds the connection-setup phase so a slow or
+/// unresponsive provider host can't hang the (single-threaded) agent
+/// for the whole global window. See audit D5.
+pub const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
+
 impl AgentOpts {
     pub fn with_global_timeout(secs: u64) -> Self {
         Self {
+            timeout_resolve: Some(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS)),
+            timeout_connect: Some(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS)),
             timeout_global: Some(Duration::from_secs(secs)),
             ..Self::default()
         }
@@ -169,5 +177,21 @@ mod tests {
         // Fail-closed path builds an Agent with an empty root set; it
         // must not panic at construction (connections fail at handshake).
         let _ = build_agent(AgentOpts::default());
+    }
+
+    #[test]
+    fn with_global_timeout_also_bounds_connect_and_resolve() {
+        // Every provider client builds on this constructor; it must set
+        // connect + resolve caps, not just the global one (D5).
+        let opts = AgentOpts::with_global_timeout(30);
+        assert_eq!(opts.timeout_global, Some(Duration::from_secs(30)));
+        assert_eq!(
+            opts.timeout_connect,
+            Some(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS))
+        );
+        assert_eq!(
+            opts.timeout_resolve,
+            Some(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS))
+        );
     }
 }
