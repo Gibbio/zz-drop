@@ -89,6 +89,13 @@ remote bytes
   → write
 ```
 
+Decompression is **size-capped** (`MAX_DECOMPRESSED_BYTES`, 512 MiB):
+remote bytes are attacker-influenced, and zstd's expansion ratio is
+unbounded, so `dx` refuses output beyond the cap rather than risk a
+decompression-bomb OOM. The tar extraction that may follow is bounded by
+that already-capped buffer (and the `tar` crate rejects `..`/absolute
+members).
+
 If the `e` modifier ever lands, compression will run before
 encryption — encrypted bytes are high-entropy and won't compress
 further.

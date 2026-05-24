@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use zz_drop_core::PlainProfile;
-use zz_drop_core::crypto::compression::{decompress, is_tar_ustar, is_zstd_magic};
+use zz_drop_core::crypto::compression::{
+    MAX_DECOMPRESSED_BYTES, decompress_capped, is_tar_ustar, is_zstd_magic,
+};
 use zz_drop_core::scriptable::Reason;
 
 use super::batch::BatchSummary;
@@ -262,7 +264,9 @@ fn decompress_alongside(blob: &Path, scope: TargetLabel<'_>, color: &ColorPolicy
         }
         return;
     }
-    let decoded = match decompress(&bytes) {
+    // Bound the decompressed size: the blob came from the network, and
+    // a malicious `.zst` could otherwise inflate to many GB (D6).
+    let decoded = match decompress_capped(&bytes, MAX_DECOMPRESSED_BYTES) {
         Ok(d) => d,
         Err(e) => {
             output::emit_failed_file(
