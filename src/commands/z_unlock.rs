@@ -459,18 +459,12 @@ fn unlock_local(paths: &Paths) -> i32 {
             return EXIT_DECRYPT_FAILED;
         }
     };
-    // KEK fingerprint is gated behind `ZZ_DROP_DECRYPT_DEBUG` —
-    // FNV of a 32-byte secret isn't reversible, but the spirit of
-    // the no-secret rule is "don't even partially exfiltrate the
-    // KEK". Logging the salt fingerprint + KDF params is enough
-    // for the everyday case ("did the on-disk file change?").
-    let key_dbg = if std::env::var("ZZ_DROP_DECRYPT_DEBUG").is_ok() {
-        format!(" key_fnv={:016x}", diag_log::fnv64(kek.key_bytes()))
-    } else {
-        String::new()
-    };
+    // No KEK fingerprint is logged: even a non-reversible FNV of the
+    // 32-byte key partially exfiltrates secret material. The salt
+    // fingerprint + KDF params below are enough for the everyday
+    // "did the on-disk file change?" diagnostic.
     diag_log::log(&format!(
-        "unlock_local decrypt_ok profiles={} kdf_m={} kdf_t={} kdf_p={} salt_fnv={:016x}{key_dbg}",
+        "unlock_local decrypt_ok profiles={} kdf_m={} kdf_t={} kdf_p={} salt_fnv={:016x}",
         profile_set.profiles.len(),
         kek.kdf_config().memory_kib,
         kek.kdf_config().iterations,

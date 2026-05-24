@@ -345,24 +345,6 @@ pub fn decrypt_set(
     };
 
     let key = derive_key(passphrase, &salt, &config)?;
-    if std::env::var("ZZ_DROP_DECRYPT_DEBUG").is_ok() {
-        let key_hash: u64 = key
-            .iter()
-            .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(*b as u64));
-        eprintln!(
-            "[zz-drop:decrypt] envelope_len={} pass_len={} pass_bytes={:?} salt_b64={} nonce_b64={} kdf_m={} kdf_t={} kdf_p={} ct_len={} key_fnv={:016x}",
-            envelope.len(),
-            passphrase.len(),
-            passphrase.as_bytes(),
-            parsed.kdf.salt,
-            parsed.cipher.nonce,
-            parsed.kdf.memory_kib,
-            parsed.kdf.iterations,
-            parsed.kdf.parallelism,
-            ciphertext.len(),
-            key_hash
-        );
-    }
     let plaintext: Zeroizing<Vec<u8>> = Zeroizing::new(aead_decrypt(&key, &nonce, &ciphertext)?);
 
     // Try to decode as ProfileSet (v2 schema). Schema v1 was an
