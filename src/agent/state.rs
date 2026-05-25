@@ -10,6 +10,17 @@ use zz_drop_core::{PlainProfile, ProfileKek, ProfileSet};
 use super::list_cache::{Hit, ListCache};
 use super::remote_client::{BuildError, RemoteClientCache};
 
+/// Hard ceiling on entries returned from a single `ListRemote`,
+/// enforced by the agent regardless of the client-requested
+/// `max_results` (see `docs/agent-protocol.md`). Stops a buggy or
+/// hostile client from pulling an unbounded listing through the agent.
+const MAX_LIST_RESULTS: usize = 200;
+
+/// Clamp the client-requested result count to the agent's hard cap.
+fn effective_cap(max_results: u32) -> usize {
+    (max_results as usize).min(MAX_LIST_RESULTS)
+}
+
 /// Non-cryptographic 64-bit fingerprint used in the diagnostic log
 /// for the salt. Made for "did this 16-byte blob change between two
 /// log lines?" — never used to derive a key, never sent on the wire.
@@ -421,7 +432,7 @@ impl AgentState {
             .map_err(|e: BuildError| ListError::Provider(e.to_string()))?;
         let entries_raw = raw.map_err(|e| ListError::Provider(format!("{e:?}")))?;
 
-        let cap = max_results as usize;
+        let cap = effective_cap(max_results);
         let truncated = entries_raw.len() > cap;
         let mut shaped: Vec<RemoteListEntry> = entries_raw
             .into_iter()
@@ -561,6 +572,18 @@ mod tests {
         let s = AgentState::new(Duration::from_secs(600), path);
         s.unlock(set.clone(), kek, active.to_string(), None);
         (dir, s)
+    }
+
+    #[test]
+    fn list_result_cap_is_enforced_at_200() {
+        // The agent must clamp to its hard cap regardless of what the
+        // client asks for (docs/agent-protocol.md), D14.
+        assert_eq!(MAX_LIST_RESULTS, 200);
+        assert_eq!(effective_cap(0), 0);
+        assert_eq!(effective_cap(50), 50);
+        assert_eq!(effective_cap(200), 200);
+        assert_eq!(effective_cap(10_000), MAX_LIST_RESULTS);
+        assert_eq!(effective_cap(u32::MAX), MAX_LIST_RESULTS);
     }
 
     #[test]

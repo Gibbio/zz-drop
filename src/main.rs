@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::process::ExitCode;
 
 use zz_drop::agent::{self, ServerConfig};
