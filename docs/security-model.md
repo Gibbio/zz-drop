@@ -62,6 +62,19 @@ See `agent-protocol.md` for the wire protocol.
 - KDF target: ~500 ms – 1 s on an average machine.
 - No recovery if the container passphrase is lost.
 
+**Envelope header authentication (accepted limitation).** The AEAD
+authenticates the CBOR ciphertext but *not* the surrounding JSON header
+(version, KDF parameters, salt, nonce, algorithm names). This is
+accepted rather than bound as AAD: the algorithm and version names are
+checked against the only supported constants **before** key derivation,
+the KDF parameters are range-checked (see
+[`profile-format.md`](profile-format.md#kdf-parameter-bounds)), and any
+header tampering that survives those checks produces a wrong key and a
+failing Poly1305 tag. There is therefore no algorithm-downgrade or
+silent-acceptance path; binding the header as AAD would change the tag
+computation and break the frozen v1 envelope format for no additional
+practical guarantee.
+
 The payload is a `ProfileSet` — a container that holds N inner
 profiles (one inner profile per "alias", e.g. `casa-nc`,
 `gdrive-bright`). The agent caches the 32-byte KEK derived by

@@ -36,6 +36,11 @@ This repository's contribution to the project's security posture:
   + 32-byte token in a `0600` file, compared with
   `subtle::ConstantTimeEq`.
 - 10-minute TTL auto-lock + 5-minute locked-idle exit.
+- the process disables core dumps (`RLIMIT_CORE = 0`) and, on Linux,
+  marks itself non-dumpable (`PR_SET_DUMPABLE = 0`, which also blocks
+  `ptrace` by a non-root same-uid process) so a crash can't spill the
+  KEK to disk. Best-effort, defense in depth — the same-uid trust
+  boundary still applies.
 - no log file by default; the agent never opens stdout/stderr. An
   opt-in diagnostic log (no secrets — paths/lengths/FNV fingerprints
   only) is written under the cache dir only when `ZZ_DROP_DEBUG_LOG=1`
