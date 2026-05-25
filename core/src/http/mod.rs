@@ -8,7 +8,8 @@
 //!
 //! - Default: the operating system's trust store, via
 //!   [`ureq::tls::RootCerts::PlatformVerifier`] (Security.framework
-//!   on macOS, SChannel on Windows, the system CA bundle on Linux).
+//!   on macOS, the system CA bundle on Linux; zz-drop ships Unix-only,
+//!   so the verifier's Windows/SChannel backend is never reached).
 //!   This is what makes zz-drop work behind corporate
 //!   TLS-inspection proxies and against self-hosted Nextcloud
 //!   instances whose chain ends at a CA the user has already

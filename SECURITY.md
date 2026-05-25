@@ -47,8 +47,9 @@ This repository's contribution to the project's security posture:
   is set.
 - no telemetry, no analytics, no usage pings.
 - HTTPS to providers and to `zz-drop.net` uses **rustls with the
-  operating system trust store** (Security.framework on macOS,
-  SChannel on Windows, the system CA bundle on Linux). Any
+  operating system trust store** (Security.framework on macOS, the
+  system CA bundle on Linux — zz-drop ships Unix-only; Windows runs
+  via WSL, which uses the Linux trust store). Any
   certificate the OS already trusts — including a CA your
   administrator installed for a corporate TLS-inspection proxy —
   is honored. There is no `--insecure` flag. To pin a specific

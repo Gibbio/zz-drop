@@ -92,8 +92,11 @@ go through `rustls` configured with the **operating system trust
 store** via `rustls-platform-verifier`:
 
 - macOS — Security.framework
-- Windows — SChannel
 - Linux — the system CA bundle (`/etc/ssl/certs` and friends)
+
+zz-drop ships **Unix-only** (no native Windows build). Windows is
+supported via WSL, which runs the Linux binary and therefore uses the
+Linux trust store.
 
 There is no embedded Mozilla CA bundle to fall back to and no
 `--insecure` flag to bypass verification. An unverifiable
