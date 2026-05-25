@@ -13,6 +13,57 @@ surfaces frozen on the road to 1.0 are listed in
 
 ## [Unreleased]
 
+## [0.9.7] — 2026-05-25
+
+Security hardening release from a deep audit of the CLI, local agent,
+and core crypto. Every change is backward-compatible: no change to the
+command grammar, exit codes, `--json` schema, `profile.zz` format, or
+agent protocol.
+
+### Security
+
+- **Mutual agent authentication.** The CLI now verifies the agent's
+  peer UID and that the runtime dir is a private, owner-only `0700`
+  directory before sending the token or unlocking — closing a path for
+  a different local user to impersonate the agent via the world-writable
+  `/tmp` runtime dir on macOS / XDG-less Linux. (The agent already
+  checked the client's UID; the check is now mutual.)
+- **No secret logging.** Removed the `ZZ_DROP_DECRYPT_DEBUG` branch that
+  printed the passphrase and a key fingerprint. The shared diagnostic
+  log is now **off by default** (opt in with `ZZ_DROP_DEBUG_LOG=1`) and
+  no longer records the raw argv or the passphrase length — the
+  "no log file" guarantee now holds by default.
+- **Secrets zeroized.** OAuth tokens and Nextcloud app-passwords are
+  wiped from memory when dropped (e.g. on lock); the unlock passphrase
+  is held in zeroizing storage. On-disk format unchanged.
+- **Untrusted-input limits.** Argon2 parameters read from the envelope
+  header are range-checked (no OOM / CPU time-bomb on a hostile
+  container); `zz dx` caps zstd decompression size (no decompression
+  bomb); bulk download validates server-supplied filenames before
+  building local paths and strips control/ANSI bytes from names printed
+  to the terminal.
+- **TLS / process hygiene.** `SSL_CERT_FILE` now fails closed when set
+  but unusable (no silent fallback to the system trust store); provider
+  clients gained connect/resolve timeouts; the process disables core
+  dumps (and is non-dumpable on Linux) to keep the in-RAM key off disk.
+- **Install integrity documented.** `SECURITY.md`/README now state
+  plainly that `curl|sh` and brew verify a TLS-fetched SHA-256, not the
+  minisign signature (which remains a manual, optional check).
+
+### Changed
+
+- Secret files (profile, token, lock) and the agent socket are created
+  `0600` in a single step (no brief world-readable window).
+- `zz c` resolves `zz-tui` next to the running binary first, then
+  `$PATH`, so a poisoned `$PATH` can't redirect it.
+- `#![forbid(unsafe_code)]` now also on the binary crate roots
+  (workspace remains free of first-party `unsafe`).
+
+### Fixed
+
+- Removed a parallel-test flake in the completions suite (temp files
+  were named from a nanosecond timestamp only and could collide).
+
 ## [0.9.6] — 2026-05-21
 
 Fix release on the 0.9.x stabilisation track. Restores
