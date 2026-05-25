@@ -151,6 +151,37 @@ fn run_download_rejects_traversal_path() {
 }
 
 #[test]
+fn run_download_all_skips_unsafe_server_names() {
+    // A malicious server lists entries whose names would escape the
+    // destination dir or drive the terminal. download_dir must skip
+    // them and only fetch the safe one (D7/D8).
+    let tmp = tempdir().unwrap();
+    let remote = FakeRemoteFs::new();
+    remote.put_file(&["safe.md"], b"ok".to_vec());
+    remote.put_file(&[".."], b"evil".to_vec()); // traversal
+    remote.put_file(&["a/b"], b"evil".to_vec()); // embedded separator
+    remote.put_file(&["x\u{1b}[2J"], b"evil".to_vec()); // ANSI escape
+
+    let code = run_download_all(
+        &remote,
+        tmp.path(),
+        false,
+        &sample_profile(),
+        &no_color(),
+        false,
+        None,
+    );
+
+    assert!(tmp.path().join("safe.md").is_file());
+    assert_ne!(code, EXIT_OK, "unsafe entries must be recorded as failures");
+    assert_eq!(
+        remote.download_count(),
+        1,
+        "only the safe entry should be fetched"
+    );
+}
+
+#[test]
 fn empty_download_batch_succeeds() {
     let tmp = tempdir().unwrap();
     let remote = FakeRemoteFs::new();

@@ -36,7 +36,15 @@ This repository's contribution to the project's security posture:
   + 32-byte token in a `0600` file, compared with
   `subtle::ConstantTimeEq`.
 - 10-minute TTL auto-lock + 5-minute locked-idle exit.
-- no log file; the agent never opens stdout/stderr.
+- the process disables core dumps (`RLIMIT_CORE = 0`) and, on Linux,
+  marks itself non-dumpable (`PR_SET_DUMPABLE = 0`, which also blocks
+  `ptrace` by a non-root same-uid process) so a crash can't spill the
+  KEK to disk. Best-effort, defense in depth — the same-uid trust
+  boundary still applies.
+- no log file by default; the agent never opens stdout/stderr. An
+  opt-in diagnostic log (no secrets — paths/lengths/FNV fingerprints
+  only) is written under the cache dir only when `ZZ_DROP_DEBUG_LOG=1`
+  is set.
 - no telemetry, no analytics, no usage pings.
 - HTTPS to providers and to `zz-drop.net` uses **rustls with the
   operating system trust store** (Security.framework on macOS,
@@ -47,7 +55,10 @@ This repository's contribution to the project's security posture:
   bundle of roots and ignore everything else, set
   `SSL_CERT_FILE=/path/to/roots.pem` before invoking zz-drop;
   only the PEM certificates in that file will be trusted for the
-  duration of the run.
+  duration of the run. If that variable is set but the file cannot
+  be read or contains no certificate, zz-drop **fails closed** (it
+  trusts nothing and every connection fails) rather than falling
+  back to the OS trust store.
 
 ## What you should know before deploying
 
@@ -59,6 +70,32 @@ This repository's contribution to the project's security posture:
 - **No recovery if the container passphrase is lost.** Pick a
   passphrase you can remember; the only way back from a lost one
   is `zz w` and a fresh setup.
+
+## Install integrity
+
+The `brew` and `curl | sh` installers verify a **SHA-256 that GitHub
+serves over HTTPS** next to the binary. That catches a corrupted or
+truncated download, but the binary and its checksum come from the *same*
+GitHub release over the *same* channel — so an install's integrity
+ultimately rests on **GitHub + TLS** not being compromised. The
+installers do **not** check the minisign signature.
+
+Every release artifact is *also* signed with
+[minisign](https://jedisct1.github.io/minisign/) (public key
+`release-key.pub`). This is an **optional, manual** check — no install
+path performs it, because that would require every user to have the
+`minisign` tool. To verify a download independently:
+
+```sh
+minisign -Vm <downloaded-artifact> -p release-key.pub
+```
+
+Because client-side verification can't be guaranteed (no verifier is
+shipped with the install), the primary defense against a *tampered
+release* — a compromised CI run, release token, or CDN — is keeping the
+release pipeline locked down (least-privilege tokens, pinned Actions,
+protected release workflow). The minisign signature is the independent
+backstop a security-conscious user can run by hand.
 
 ## Scriptable mode and the passphrase file
 

@@ -25,6 +25,8 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
+use zeroize::Zeroizing;
+
 use zz_drop_core::AgentResponse;
 use zz_drop_core::config::Paths;
 use zz_drop_core::diag_log;
@@ -80,11 +82,11 @@ fn scriptable() -> bool {
 /// when supplied, otherwise prompt interactively. In scriptable
 /// mode a missing flag is a hard error — we never prompt under
 /// `--json`/`--quiet`.
-fn obtain_passphrase(label: &str) -> Result<String, i32> {
+fn obtain_passphrase(label: &str) -> Result<Zeroizing<String>, i32> {
     if let Some(path) = runtime::flags().passphrase_file.clone() {
         let uid = crate::config::current_uid();
         match pp::read_passphrase_file(&path, uid) {
-            Ok(s) => return Ok(s),
+            Ok(s) => return Ok(Zeroizing::new(s)),
             Err(e) => {
                 let exit = if e.is_insecure() {
                     EXIT_PASSPHRASE_FILE_INSECURE
@@ -114,7 +116,7 @@ fn obtain_passphrase(label: &str) -> Result<String, i32> {
     }
 
     match prompt_passphrase(label) {
-        Ok(p) => Ok(p),
+        Ok(p) => Ok(Zeroizing::new(p)),
         Err(e) => {
             output::emit_failed_bare(Reason::Usage, Some(&format!("could not read passphrase: {e}")));
             Err(EXIT_USAGE)
@@ -428,7 +430,6 @@ fn unlock_local(paths: &Paths) -> i32 {
         Ok(p) => p,
         Err(code) => return code,
     };
-    diag_log::log(&format!("unlock_local prompt pass_len={}", passphrase.len()));
 
     let (profile_set, kek) = match decrypt_set(&envelope, &passphrase) {
         Ok(pair) => pair,
@@ -438,8 +439,7 @@ fn unlock_local(paths: &Paths) -> i32 {
                 Some("decryption failed (wrong passphrase or corrupted container)"),
             );
             diag_log::log(&format!(
-                "unlock_local decrypt_fail kind=Aead envelope_fnv={envelope_fnv:016x} pass_len={}",
-                passphrase.len()
+                "unlock_local decrypt_fail kind=Aead envelope_fnv={envelope_fnv:016x}"
             ));
             return EXIT_DECRYPT_FAILED;
         }
@@ -459,18 +459,12 @@ fn unlock_local(paths: &Paths) -> i32 {
             return EXIT_DECRYPT_FAILED;
         }
     };
-    // KEK fingerprint is gated behind `ZZ_DROP_DECRYPT_DEBUG` —
-    // FNV of a 32-byte secret isn't reversible, but the spirit of
-    // the no-secret rule is "don't even partially exfiltrate the
-    // KEK". Logging the salt fingerprint + KDF params is enough
-    // for the everyday case ("did the on-disk file change?").
-    let key_dbg = if std::env::var("ZZ_DROP_DECRYPT_DEBUG").is_ok() {
-        format!(" key_fnv={:016x}", diag_log::fnv64(kek.key_bytes()))
-    } else {
-        String::new()
-    };
+    // No KEK fingerprint is logged: even a non-reversible FNV of the
+    // 32-byte key partially exfiltrates secret material. The salt
+    // fingerprint + KDF params below are enough for the everyday
+    // "did the on-disk file change?" diagnostic.
     diag_log::log(&format!(
-        "unlock_local decrypt_ok profiles={} kdf_m={} kdf_t={} kdf_p={} salt_fnv={:016x}{key_dbg}",
+        "unlock_local decrypt_ok profiles={} kdf_m={} kdf_t={} kdf_p={} salt_fnv={:016x}",
         profile_set.profiles.len(),
         kek.kdf_config().memory_kib,
         kek.kdf_config().iterations,

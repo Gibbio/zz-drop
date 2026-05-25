@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use zz_drop_core::PlainProfile;
-use zz_drop_core::crypto::compression::{decompress, is_tar_ustar, is_zstd_magic};
+use zz_drop_core::crypto::compression::{
+    MAX_DECOMPRESSED_BYTES, decompress_capped, is_tar_ustar, is_zstd_magic,
+};
 use zz_drop_core::scriptable::Reason;
 
 use super::batch::BatchSummary;
@@ -87,6 +89,21 @@ pub fn run_download<R: RemoteFs>(
 /// supported and will be sent through literally.
 fn has_glob(s: &str) -> bool {
     s.contains('*') || s.contains('?')
+}
+
+/// True when a server-supplied listing name is safe to use as a single
+/// local path component. `download_dir` joins listing names directly
+/// onto the destination dir, so an unchecked `..`, separator, absolute
+/// path, NUL, or control char from a malicious server could escape the
+/// destination or drive the terminal. Rejected names are skipped (D7).
+fn is_safe_local_component(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains('\0')
+        && !name.chars().any(char::is_control)
 }
 
 /// Expand a glob pattern against the target's parent directory.
@@ -262,7 +279,9 @@ fn decompress_alongside(blob: &Path, scope: TargetLabel<'_>, color: &ColorPolicy
         }
         return;
     }
-    let decoded = match decompress(&bytes) {
+    // Bound the decompressed size: the blob came from the network, and
+    // a malicious `.zst` could otherwise inflate to many GB (D6).
+    let decoded = match decompress_capped(&bytes, MAX_DECOMPRESSED_BYTES) {
         Ok(d) => d,
         Err(e) => {
             output::emit_failed_file(
@@ -429,6 +448,20 @@ fn download_dir<R: RemoteFs>(
     }
 
     for entry in entries {
+        // The listing name is server-supplied; never let it escape the
+        // destination dir via `..`, a separator, or an absolute path,
+        // nor carry control bytes into a local path (D7).
+        if !is_safe_local_component(&entry.name) {
+            output::emit_failed_file(
+                &entry.name,
+                Reason::Usage,
+                "unsafe remote name",
+                scope,
+                color,
+            );
+            summary.record_failure();
+            continue;
+        }
         if entry.is_directory {
             if !recursive {
                 continue;
@@ -470,7 +503,30 @@ fn _unused(_: PathBuf) {}
 
 #[cfg(test)]
 mod tests {
-    use super::{glob_match, has_glob};
+    use super::{glob_match, has_glob, is_safe_local_component};
+
+    #[test]
+    fn safe_local_component_accepts_plain_names() {
+        assert!(is_safe_local_component("readme.md"));
+        assert!(is_safe_local_component("Quectel.pdf"));
+        assert!(is_safe_local_component("file with spaces.txt"));
+        assert!(is_safe_local_component("ünïcödé.txt"));
+    }
+
+    #[test]
+    fn safe_local_component_rejects_traversal_and_separators() {
+        assert!(!is_safe_local_component(""));
+        assert!(!is_safe_local_component("."));
+        assert!(!is_safe_local_component(".."));
+        assert!(!is_safe_local_component("../etc/passwd"));
+        assert!(!is_safe_local_component("a/b"));
+        assert!(!is_safe_local_component("a\\b"));
+        assert!(!is_safe_local_component("/etc/passwd")); // absolute → has '/'
+        assert!(!is_safe_local_component("nul\0byte"));
+        // ANSI / control bytes a malicious server could embed.
+        assert!(!is_safe_local_component("evil\u{1b}[2Jname"));
+        assert!(!is_safe_local_component("tab\tname"));
+    }
 
     #[test]
     fn glob_match_handles_star() {

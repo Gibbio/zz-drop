@@ -14,7 +14,9 @@ Token file:
 - 32 random bytes
 - 0600 permissions
 
-Directory permissions: 0700.
+Directory permissions: 0700. The socket and token/lock files are
+created with mode `0600` in a single `open` (no write-then-chmod
+window); the socket is additionally `chmod`ed to `0600` after `bind`.
 
 ## Security
 
@@ -22,8 +24,16 @@ Each connection must pass:
 
 1. peer UID credential check
    - Linux: `SO_PEERCRED`
-   - macOS/BSD: `getpeereid()`
+   - macOS/BSD: `getpeereid()` / `LOCAL_PEERCRED`
 2. token check
+
+The check is **mutual**. Before sending the token, the client validates
+the runtime dir (real directory, owned by the current UID, mode `0700`)
+and reads the *agent's* peer UID, refusing to proceed unless it equals
+its own EUID. This prevents a rogue agent — squatting the socket path in
+a world-writable runtime dir (`/tmp/zz-drop-$UID` on macOS / XDG-less
+Linux) under a different UID — from ever receiving the token or an
+`Unlock` payload. See `docs/agent.md` → "Mutual checks".
 
 ## Framing
 

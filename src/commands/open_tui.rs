@@ -18,9 +18,15 @@ const TUI_BINARY: &str = "zz-tui";
 /// We mirror it here so scripts that wrap `zz c` see the same code.
 pub const EXIT_TUI_NOT_FOUND: i32 = 127;
 
-/// Resolve `zz-tui` on PATH and run it, propagating its exit code.
-/// Prints a one-line diagnostic and returns 127 when the binary is
-/// missing, or when launching it fails for any other reason.
+/// Resolve `zz-tui` and run it, propagating its exit code. Prints a
+/// one-line diagnostic and returns 127 when the binary is missing, or
+/// when launching it fails for any other reason.
+///
+/// Resolution prefers the `zz-tui` installed **next to this binary**
+/// (the install dir, found via `current_exe()`): the installer always
+/// places `zz-drop` and `zz-tui` together, and a sibling lookup can't be
+/// redirected by a poisoned `$PATH` (F6). Only if no sibling exists do
+/// we fall back to a `$PATH` search.
 ///
 /// In scriptable modes (`--json` / `--quiet`) the TUI cannot run,
 /// so the command fails fast with `interactive_only` and exit
@@ -36,21 +42,42 @@ pub fn run() -> i32 {
         );
         return EXIT_USAGE;
     }
+    if let Some(path) = sibling_tui_binary() {
+        return launch(&path);
+    }
     run_with_env(env::var_os("PATH").as_deref())
 }
 
+/// Locate `zz-tui` alongside the currently-running executable. Returns
+/// `None` if `current_exe()` can't be resolved or no runnable `zz-tui`
+/// sits next to it.
+fn sibling_tui_binary() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    // Canonicalize so a `zz` symlink resolves to the real install dir.
+    let exe = exe.canonicalize().ok()?;
+    sibling_in_dir(exe.parent()?)
+}
+
+fn sibling_in_dir(dir: &Path) -> Option<PathBuf> {
+    candidates(dir, TUI_BINARY).into_iter().find(|c| is_runnable(c))
+}
+
 /// Test seam: lets the integration tests inject a custom `PATH`
-/// without poisoning the parent process's environment.
+/// without poisoning the parent process's environment. Used as the
+/// fallback when no sibling `zz-tui` is found.
 pub fn run_with_env(path_var: Option<&OsStr>) -> i32 {
     let Some(path) = find_in_path(TUI_BINARY, path_var) else {
         output::line(&format!(
-            "zz c: `{TUI_BINARY}` not found on PATH.\n\
+            "zz c: `{TUI_BINARY}` not found next to zz-drop or on PATH.\n\
              install the zz-drop package, or add the binary to PATH."
         ));
         return EXIT_TUI_NOT_FOUND;
     };
+    launch(&path)
+}
 
-    match Command::new(&path).status() {
+fn launch(path: &Path) -> i32 {
+    match Command::new(path).status() {
         Ok(status) => status.code().unwrap_or(1),
         Err(e) => {
             output::line(&format!(
@@ -109,6 +136,23 @@ mod tests {
     #[test]
     fn missing_path_var_means_not_found() {
         assert_eq!(run_with_env(None), EXIT_TUI_NOT_FOUND);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sibling_in_dir_prefers_executable_zz_tui() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        // No sibling yet → None.
+        assert!(sibling_in_dir(tmp.path()).is_none());
+        // A non-executable file does not count.
+        let p = tmp.path().join("zz-tui");
+        std::fs::write(&p, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(sibling_in_dir(tmp.path()).is_none());
+        // Mark it runnable → found.
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(sibling_in_dir(tmp.path()), Some(p));
     }
 
     #[test]

@@ -4553,6 +4553,7 @@ dependencies = [
  "tar",
  "tempfile",
  "thiserror 2.0.18",
+ "zeroize",
  "zz-drop-core",
  "zz-drop-tui",
 ]

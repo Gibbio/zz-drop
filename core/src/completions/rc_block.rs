@@ -175,13 +175,19 @@ mod tests {
     use std::env;
 
     fn tmp_rc() -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        // Monotonic counter, not just a nanosecond timestamp: parallel
+        // tests collided on the same clock tick and shared one rc file,
+        // causing flaky failures. The counter guarantees uniqueness.
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let p = env::temp_dir().join(format!(
-            "zz-rc-test-{}-{}.rc",
+            "zz-rc-test-{}-{nanos}-{seq}.rc",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
         ));
         let _ = fs::remove_file(&p);
         p

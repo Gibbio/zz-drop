@@ -72,8 +72,45 @@ pub fn compress(plaintext: &[u8], level: i32) -> io::Result<Vec<u8>> {
 /// Decompress a zstd-encoded blob. Returns the decoded bytes.
 /// Errors propagate from the underlying decoder (truncated
 /// frame, unsupported version, etc.).
+///
+/// ⚠️ Unbounded output: only call this on input you produced. For
+/// remote/attacker-controlled blobs use [`decompress_capped`], which
+/// bounds the decompressed size to defend against a zstd bomb.
 pub fn decompress(ciphertext: &[u8]) -> io::Result<Vec<u8>> {
     zstd::stream::decode_all(ciphertext)
+}
+
+/// Default ceiling on decompressed output for remote blobs. A
+/// downloaded blob is itself capped at ~10 MiB by the HTTP client, but
+/// zstd's expansion ratio is unbounded (>1000:1 trivially), so without
+/// an output cap a small malicious `.zst` could inflate to many GB and
+/// exhaust memory. 512 MiB is ~50× the download cap — generous for any
+/// legitimate file this tool moves, while blocking the bomb. See
+/// security audit D6.
+pub const MAX_DECOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Decompress a zstd blob, refusing output larger than `max_bytes`.
+/// Streams through the decoder so the bomb is stopped *before* the
+/// oversized buffer is fully materialised, then fails with
+/// `InvalidData` rather than allocating without bound.
+pub fn decompress_capped(ciphertext: &[u8], max_bytes: u64) -> io::Result<Vec<u8>> {
+    use std::io::Read;
+
+    let mut decoder = zstd::stream::read::Decoder::new(ciphertext)?;
+    let mut out = Vec::new();
+    // Read at most max_bytes+1 so an output of exactly the limit is
+    // accepted while anything larger is detected and rejected.
+    decoder
+        .by_ref()
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut out)?;
+    if out.len() as u64 > max_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("decompressed output exceeds {max_bytes}-byte limit"),
+        ));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -180,6 +217,34 @@ mod tests {
         );
         let decoded = decompress(&compressed).unwrap();
         assert_eq!(decoded, plaintext);
+    }
+
+    #[test]
+    fn decompress_capped_rejects_bomb_but_allows_within_limit() {
+        // 5 MiB of zeros compresses to a few KB — a miniature bomb.
+        let payload = vec![0u8; 5 * 1024 * 1024];
+        let compressed = compress(&payload, DEFAULT_COMPRESSION_LEVEL).unwrap();
+        assert!(
+            compressed.len() < 64 * 1024,
+            "zeros should compress to a tiny blob ({} bytes)",
+            compressed.len()
+        );
+
+        // Cap below the true output → rejected before full allocation.
+        let err = decompress_capped(&compressed, 1024 * 1024); // 1 MiB < 5 MiB
+        assert!(err.is_err(), "5 MiB output must exceed a 1 MiB cap");
+
+        // Cap above the true output → succeeds and round-trips exactly.
+        let ok = decompress_capped(&compressed, 16 * 1024 * 1024).unwrap();
+        assert_eq!(ok, payload);
+    }
+
+    #[test]
+    fn decompress_capped_accepts_output_exactly_at_limit() {
+        let payload = b"abc".repeat(4096); // 12_288 bytes
+        let compressed = compress(&payload, DEFAULT_COMPRESSION_LEVEL).unwrap();
+        let ok = decompress_capped(&compressed, payload.len() as u64).unwrap();
+        assert_eq!(ok, payload);
     }
 
     #[test]

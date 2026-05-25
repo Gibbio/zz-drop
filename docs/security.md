@@ -39,7 +39,11 @@ process running under your UID.
   `LOCAL_PEERCRED` on macOS) and a 32-byte token in a `0600` file,
   compared with `subtle::ConstantTimeEq`.
 - `config.toml` is plain TOML and **never** contains secrets.
-- There is **no log file**. The agent never opens stdout/stderr.
+- There is **no log file by default**. The agent never opens
+  stdout/stderr. A diagnostic log containing **no secrets** (paths,
+  lengths, KDF params, FNV fingerprints, request discriminants) is
+  written under the cache dir only when you opt in with
+  `ZZ_DROP_DEBUG_LOG=1`.
 
 ## What the daily commands write to disk
 

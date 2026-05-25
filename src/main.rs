@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::process::ExitCode;
 
 use zz_drop::agent::{self, ServerConfig};
@@ -8,6 +10,8 @@ use zz_drop::sacs;
 use zz_drop::{cli, commands, output};
 
 fn main() -> ExitCode {
+    harden_process();
+
     if agent::is_agent_mode() {
         return run_agent();
     }
@@ -24,7 +28,10 @@ fn main() -> ExitCode {
     }
 
     init_diag_log("zz");
-    zz_drop_core::diag_log::log(&format!("invoke argv={:?}", args));
+    // Log only the argument count, never the raw argv: operands can be
+    // filenames / paths / alias names the operator may consider private,
+    // and the per-command emitters already record the verb + outcome.
+    zz_drop_core::diag_log::log(&format!("invoke argc={}", args.len()));
 
     // Strip global flags (`--json`, `--quiet`, `--passphrase-file`,
     // `--alias`, `--local`, `--remote`, `--yes`) from the front of
@@ -53,6 +60,29 @@ fn main() -> ExitCode {
     let code = commands::dispatch(&cmd);
     zz_drop_core::diag_log::log(&format!("dispatch_done exit={code}"));
     ExitCode::from(u8::try_from(code).unwrap_or(255))
+}
+
+/// Best-effort process hardening for any invocation that may hold
+/// secret material — the unlock passphrase / KEK in the CLI, and the
+/// KEK in the long-lived agent (spawned via this same `main`). Disable
+/// core dumps so a crash can't spill RAM (including the KEK) to disk,
+/// and on Linux mark the process non-dumpable, which additionally blocks
+/// `ptrace` by a non-root same-uid process. Failures are ignored: this
+/// is defense in depth, not a correctness requirement. See audit D12.
+fn harden_process() {
+    use rustix::process::{Resource, Rlimit, setrlimit};
+    let _ = setrlimit(
+        Resource::Core,
+        Rlimit {
+            current: Some(0),
+            maximum: Some(0),
+        },
+    );
+    #[cfg(target_os = "linux")]
+    {
+        use rustix::process::{DumpableBehavior, set_dumpable_behavior};
+        let _ = set_dumpable_behavior(DumpableBehavior::NotDumpable);
+    }
 }
 
 /// Initialise the shared `zz-drop.log` for the calling binary. No-op

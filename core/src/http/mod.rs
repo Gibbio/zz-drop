@@ -37,9 +37,17 @@ pub struct AgentOpts {
     pub allow_non_standard_methods: bool,
 }
 
+/// Default DNS-resolve and TCP-connect timeout applied alongside the
+/// global timeout. Bounds the connection-setup phase so a slow or
+/// unresponsive provider host can't hang the (single-threaded) agent
+/// for the whole global window. See audit D5.
+pub const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
+
 impl AgentOpts {
     pub fn with_global_timeout(secs: u64) -> Self {
         Self {
+            timeout_resolve: Some(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS)),
+            timeout_connect: Some(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS)),
             timeout_global: Some(Duration::from_secs(secs)),
             ..Self::default()
         }
@@ -66,26 +74,66 @@ pub fn build_agent(opts: AgentOpts) -> Agent {
     b.build().into()
 }
 
-fn build_tls_config() -> TlsConfig {
-    if let Some(certs) = load_ssl_cert_file_env() {
-        return TlsConfig::builder().root_certs(RootCerts::from(certs)).build();
-    }
-    TlsConfig::builder()
-        .root_certs(RootCerts::PlatformVerifier)
-        .build()
+/// Outcome of consulting `SSL_CERT_FILE`.
+enum SslCertFile {
+    /// Variable unset (or empty) — use the OS trust store.
+    Unset,
+    /// Variable set and at least one certificate parsed — use exactly
+    /// these as the trust roots.
+    Certs(Vec<Certificate<'static>>),
+    /// Variable set but the file could not be read or yielded no usable
+    /// certificate. We must **not** silently fall back to the system
+    /// trust store the operator meant to override.
+    Unusable,
 }
 
-fn load_ssl_cert_file_env() -> Option<Vec<Certificate<'static>>> {
-    let path = std::env::var_os("SSL_CERT_FILE")?;
-    let bytes = std::fs::read(path).ok()?;
-    let certs: Vec<Certificate<'static>> = parse_pem(&bytes)
+fn build_tls_config() -> TlsConfig {
+    match ssl_cert_file_roots() {
+        SslCertFile::Unset => TlsConfig::builder()
+            .root_certs(RootCerts::PlatformVerifier)
+            .build(),
+        SslCertFile::Certs(certs) => {
+            TlsConfig::builder().root_certs(RootCerts::from(certs)).build()
+        }
+        SslCertFile::Unusable => {
+            // Fail closed: `SSL_CERT_FILE` was set but unusable, so trust
+            // an EMPTY root set — every TLS handshake then fails — rather
+            // than reverting to the platform store the operator pinned
+            // away from. Better a loud connection failure than silently
+            // honoring roots they tried to exclude (audit D4).
+            TlsConfig::builder()
+                .root_certs(RootCerts::from(Vec::<Certificate<'static>>::new()))
+                .build()
+        }
+    }
+}
+
+fn ssl_cert_file_roots() -> SslCertFile {
+    let Some(path) = std::env::var_os("SSL_CERT_FILE") else {
+        return SslCertFile::Unset;
+    };
+    if path.is_empty() {
+        return SslCertFile::Unset;
+    }
+    match std::fs::read(&path) {
+        Ok(bytes) => certs_from_pem(&bytes),
+        Err(_) => SslCertFile::Unusable,
+    }
+}
+
+fn certs_from_pem(bytes: &[u8]) -> SslCertFile {
+    let certs: Vec<Certificate<'static>> = parse_pem(bytes)
         .filter_map(Result::ok)
         .filter_map(|item| match item {
             PemItem::Certificate(c) => Some(c),
             _ => None,
         })
         .collect();
-    if certs.is_empty() { None } else { Some(certs) }
+    if certs.is_empty() {
+        SslCertFile::Unusable
+    } else {
+        SslCertFile::Certs(certs)
+    }
 }
 
 #[cfg(test)]
@@ -107,5 +155,43 @@ mod tests {
             allow_non_standard_methods: true,
         };
         let _ = build_agent(opts);
+    }
+
+    #[test]
+    fn ssl_cert_file_bytes_without_valid_cert_are_unusable() {
+        // A set-but-broken SSL_CERT_FILE must classify as Unusable so
+        // build_tls_config fails closed instead of using the OS store.
+        assert!(matches!(certs_from_pem(b""), SslCertFile::Unusable));
+        assert!(matches!(
+            certs_from_pem(b"not a pem file at all"),
+            SslCertFile::Unusable
+        ));
+        // A PEM block of the wrong type (a key, not a certificate) also
+        // yields no trusted roots → Unusable.
+        let key_pem = b"-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n";
+        assert!(matches!(certs_from_pem(key_pem), SslCertFile::Unusable));
+    }
+
+    #[test]
+    fn build_tls_config_does_not_panic_on_empty_roots() {
+        // Fail-closed path builds an Agent with an empty root set; it
+        // must not panic at construction (connections fail at handshake).
+        let _ = build_agent(AgentOpts::default());
+    }
+
+    #[test]
+    fn with_global_timeout_also_bounds_connect_and_resolve() {
+        // Every provider client builds on this constructor; it must set
+        // connect + resolve caps, not just the global one (D5).
+        let opts = AgentOpts::with_global_timeout(30);
+        assert_eq!(opts.timeout_global, Some(Duration::from_secs(30)));
+        assert_eq!(
+            opts.timeout_connect,
+            Some(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS))
+        );
+        assert_eq!(
+            opts.timeout_resolve,
+            Some(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS))
+        );
     }
 }

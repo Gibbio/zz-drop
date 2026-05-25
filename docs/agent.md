@@ -38,6 +38,31 @@ Each connection must pass two checks:
    closed before any protocol message is processed.
 
 After both pass, the protocol from
+
+### Mutual checks: the client also authenticates the agent
+
+The socket lives in the runtime dir, which on macOS (and on Linux when
+`$XDG_RUNTIME_DIR` is unset) sits under the world-writable, sticky
+`/tmp`. To stop a *different* local user from pre-creating that directory
+and standing up a rogue agent that would receive an `Unlock` (and with it
+the KEK and the whole decrypted profile), the **client** performs two
+checks of its own before any secret leaves the process:
+
+1. **Runtime-dir validation** — the directory holding the socket + token
+   must be a real directory (not a symlink), owned by the current UID,
+   with mode `0700` (no group/other bits). Enforced by
+   `zz_drop_core::config::verify_private_dir`, called by both the agent
+   (before `bind`) and every client (before `connect` sends anything).
+2. **Server peer-UID check** — after `connect`, the client reads the
+   *agent's* peer UID (`SO_PEERCRED` / `LOCAL_PEERCRED`) and aborts unless
+   it equals the client's own EUID. A cross-UID attacker cannot run a
+   process under the victim's UID, so a foreign agent can never receive
+   the token or the `Unlock` payload.
+
+The peer-UID check is therefore **mutual**: server authenticates client,
+and client authenticates server.
+
+The protocol from
 [`agent-protocol.md`](./agent-protocol.md)
 is used: postcard payload, 4-byte big-endian length prefix, 1 MiB frame
 limit, version `1`.
@@ -74,8 +99,10 @@ The reference values are pinned in
 
 The agent itself never opens stdout / stderr (they are redirected to
 `/dev/null` at spawn). It writes nothing to disk except the socket and
-the token file. There is no log file. Diagnostic output for users is
-the responsibility of `zz f`, not of the agent.
+the token file. There is no log file by default; a diagnostic log
+(no secrets) is written under the cache dir only when the operator sets
+`ZZ_DROP_DEBUG_LOG=1`. Diagnostic output for users is the
+responsibility of `zz f`, not of the agent.
 
 ## Memory model
 
@@ -84,11 +111,14 @@ behind a `Mutex`. The agent never persists the profile. The provider
 credentials (Nextcloud app password, OAuth token) are only present in
 the encrypted `profile.zz` and in the agent's RAM when unlocked.
 
-Note: in this milestone the in-RAM `PlainProfile` is a plain Rust
-struct. Its `String` fields are not zeroized in place when the agent
-locks: locking drops them and process exit returns the pages to the
-OS. A future task may replace the affected fields with explicit
-`Zeroizing` wrappers.
+Note: the provider **auth secrets** (OAuth access/refresh tokens,
+Nextcloud app-password / login-flow token) are zeroized in place when
+their struct is dropped — locking the agent, dropping a transient clone,
+or process exit all wipe the token bytes from the freed buffer (see
+`*Auth` `Drop` impls; security audit F2). The non-secret `PlainProfile`
+fields (alias, server URL, folder names) remain plain `String`s and are
+not wiped — they carry no credential. The unlock passphrase is held in a
+`Zeroizing<String>` for the duration of the unlock and wiped afterward.
 
 ## SACS endpoints — `LIST_REMOTE` and `INVALIDATE_REMOTE`
 

@@ -507,11 +507,20 @@ mod tests {
     }
 
     fn uniq_suffix() -> u128 {
+        use std::sync::atomic::{AtomicU64, Ordering};
         use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
+        // A monotonic per-process counter guarantees a distinct temp
+        // path even when parallel tests call within the same clock tick
+        // (the bare nanosecond timestamp collided under `--test-threads`
+        // > 1, clobbering shared rc files → flaky failures). The wall
+        // clock in the high bits keeps reruns from reusing a stale dir.
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let seq = u128::from(COUNTER.fetch_add(1, Ordering::Relaxed));
+        let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos();
+        (nanos << 24) | (seq & 0xFF_FFFF)
     }
 
     fn req<'a>(shell: Shell, home: &Path, script: &'a str) -> InstallRequest<'a> {

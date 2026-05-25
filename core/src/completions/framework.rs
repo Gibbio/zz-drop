@@ -101,13 +101,20 @@ mod tests {
     use std::fs;
 
     fn tmp_file(content: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        // Monotonic counter, not just a nanosecond timestamp: parallel
+        // framework tests collided on the same clock tick and wrote the
+        // same file, so one test read another's content (flaky
+        // `detects_*` failures). The counter guarantees uniqueness.
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let path = env::temp_dir().join(format!(
-            "zz-framework-test-{}-{}.zshrc",
+            "zz-framework-test-{}-{nanos}-{seq}.zshrc",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
         ));
         fs::write(&path, content).unwrap();
         path

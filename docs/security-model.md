@@ -35,7 +35,14 @@ leaves the device.
   fallback at `/tmp/zz-drop-$UID/agent.sock`. Directory permissions 0700.
 - Token file with 0600 permissions, 32 random bytes.
 - Per-connection peer UID credential check (`SO_PEERCRED` on Linux,
-  `getpeereid()` on macOS/BSD).
+  `getpeereid()` / `LOCAL_PEERCRED` on macOS/BSD). The check is
+  **mutual**: the agent authenticates the client, and the client
+  authenticates the agent (it verifies the agent's peer UID equals its
+  own EUID, and that the runtime dir is a non-symlink directory owned by
+  the current UID with mode 0700, before sending the token or any
+  `Unlock`). This protects against a different local user squatting the
+  socket path in the world-writable `/tmp/zz-drop-$UID` runtime dir used
+  on macOS and XDG-less Linux.
 - Decrypted `PlainProfile` lives in RAM only.
 - `zz q` clears RAM immediately.
 - Automatic lock after `unlock_ttl_secs = 600` (10 minutes).
@@ -54,6 +61,19 @@ See `agent-protocol.md` for the wire protocol.
 - Encrypted payload format: CBOR.
 - KDF target: ~500 ms – 1 s on an average machine.
 - No recovery if the container passphrase is lost.
+
+**Envelope header authentication (accepted limitation).** The AEAD
+authenticates the CBOR ciphertext but *not* the surrounding JSON header
+(version, KDF parameters, salt, nonce, algorithm names). This is
+accepted rather than bound as AAD: the algorithm and version names are
+checked against the only supported constants **before** key derivation,
+the KDF parameters are range-checked (see
+[`profile-format.md`](profile-format.md#kdf-parameter-bounds)), and any
+header tampering that survives those checks produces a wrong key and a
+failing Poly1305 tag. There is therefore no algorithm-downgrade or
+silent-acceptance path; binding the header as AAD would change the tag
+computation and break the frozen v1 envelope format for no additional
+practical guarantee.
 
 The payload is a `ProfileSet` — a container that holds N inner
 profiles (one inner profile per "alias", e.g. `casa-nc`,
@@ -84,6 +104,12 @@ when it points at a readable PEM, the certificates in that file
 become the **only** trusted roots for the run. This covers
 environments where a corporate CA is shipped as a `.pem` but
 cannot be installed system-wide.
+
+If `SSL_CERT_FILE` is **set but unusable** (unreadable, or it contains
+no certificate), zz-drop **fails closed**: it trusts an empty root set
+so every TLS handshake fails, rather than silently reverting to the
+system trust store the operator was trying to override. Unset the
+variable to use the OS trust store.
 
 ## Logging rules
 

@@ -7,9 +7,10 @@ use zz_drop_core::agent_proto::{
     AgentRequest, AgentResponse, EntryKindFilter, KekPayload, decode_response_body,
     encode_request_body, read_frame, write_frame,
 };
+use zz_drop_core::config::verify_private_dir;
 use zz_drop_core::{PlainProfile, ProfileKek, ProfileSet};
 
-use super::security::read_token_file;
+use super::security::{check_peer_uid, current_euid, read_token_file};
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -40,8 +41,30 @@ pub struct AgentClient {
 
 impl AgentClient {
     pub fn connect(socket: &Path, token_file: &Path) -> Result<Self, ClientError> {
+        // Defend against a malicious agent squatting the socket path. On macOS
+        // and XDG-less Linux the runtime dir lives under the world-writable
+        // `/tmp`, so a different local user could pre-create it, drop a token
+        // file and listen on the socket — then our `Unlock` would hand them the
+        // KEK and the entire decrypted profile. Two checks before any secret
+        // (the token, then the `Unlock` payload) leaves this process:
+        //
+        //   1. the runtime dir holding the socket + token must be a real
+        //      directory owned by us with mode 0700 (no foreign pre-creation);
+        //   2. the process accept()ing on the socket must run under our own UID
+        //      (peer-cred check — the mirror of the agent's own check on us).
+        //
+        // A cross-UID attacker cannot run a process under our UID, so (2) makes
+        // it impossible for a foreign agent to receive our secrets even if it
+        // somehow controlled the path.
+        if let Some(dir) = socket.parent() {
+            verify_private_dir(dir, current_euid())
+                .map_err(|e| ClientError::SocketUnreachable(e.to_string()))?;
+        }
+
         let mut stream =
             UnixStream::connect(socket).map_err(|e| ClientError::SocketUnreachable(e.to_string()))?;
+
+        check_peer_uid(&stream, current_euid()).map_err(|_| ClientError::HandshakeFailed)?;
 
         let token = read_token_file(token_file).map_err(|_| ClientError::HandshakeFailed)?;
         write_frame(&mut stream, &token).map_err(|_| ClientError::HandshakeFailed)?;
