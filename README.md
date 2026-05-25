@@ -37,9 +37,18 @@ cargo install --git https://github.com/zz-drop/zz-drop --locked zz-drop
 
 No install path needs root.
 
-Every release artifact from the brew + curl-installer channels is
-signed with [minisign](https://jedisct1.github.io/minisign/);
-the public key is [`release-key.pub`](release-key.pub).
+Every release artifact is also signed with
+[minisign](https://jedisct1.github.io/minisign/) (public key
+[`release-key.pub`](release-key.pub)) — but **the brew and
+curl-installer paths don't check that signature for you.** They verify a
+SHA-256 that GitHub serves over HTTPS, so an install's integrity rests on
+GitHub + TLS, not on the minisign key. The signature is an *optional,
+manual* backstop for anyone who wants to verify a download independently
+(needs the `minisign` tool):
+
+```bash
+minisign -Vm <downloaded-artifact> -p release-key.pub
+```
 
 Build from source with full control: see [`docs/build.md`](docs/build.md).
 

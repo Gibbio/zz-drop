@@ -66,6 +66,32 @@ This repository's contribution to the project's security posture:
   passphrase you can remember; the only way back from a lost one
   is `zz w` and a fresh setup.
 
+## Install integrity
+
+The `brew` and `curl | sh` installers verify a **SHA-256 that GitHub
+serves over HTTPS** next to the binary. That catches a corrupted or
+truncated download, but the binary and its checksum come from the *same*
+GitHub release over the *same* channel — so an install's integrity
+ultimately rests on **GitHub + TLS** not being compromised. The
+installers do **not** check the minisign signature.
+
+Every release artifact is *also* signed with
+[minisign](https://jedisct1.github.io/minisign/) (public key
+`release-key.pub`). This is an **optional, manual** check — no install
+path performs it, because that would require every user to have the
+`minisign` tool. To verify a download independently:
+
+```sh
+minisign -Vm <downloaded-artifact> -p release-key.pub
+```
+
+Because client-side verification can't be guaranteed (no verifier is
+shipped with the install), the primary defense against a *tampered
+release* — a compromised CI run, release token, or CDN — is keeping the
+release pipeline locked down (least-privilege tokens, pinned Actions,
+protected release workflow). The minisign signature is the independent
+backstop a security-conscious user can run by hand.
+
 ## Scriptable mode and the passphrase file
 
 `zz z --passphrase-file <path>` (or the matching
