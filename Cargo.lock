@@ -2626,9 +2626,9 @@ dependencies = [
 
 [[package]]
 name = "ratatui-image"
-version = "11.0.2"
+version = "11.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "535e2a5f434ea3308977e6664b4386c3d663951a222e338cb7480d8742fe7773"
+checksum = "dad0eed12f8df9b9245aa1fc71a8cfcbba36ae3b6cb1e7896a01379027da2563"
 dependencies = [
  "base64-simd",
  "icy_sixel",
@@ -2850,9 +2850,9 @@ dependencies = [
 
 [[package]]
 name = "rpassword"
-version = "7.5.2"
+version = "7.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ac5b223d9738ef56e0b98305410be40fa0941bf6036c56f1506751e43552d64"
+checksum = "2da316a15f47e3d053de9cb2c439650bd8fa4aaeb9365f2e5f27f492ff73c196"
 dependencies = [
  "libc",
  "rtoolbox",
@@ -3090,9 +3090,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.149"
+version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
 dependencies = [
  "itoa",
  "memchr",
