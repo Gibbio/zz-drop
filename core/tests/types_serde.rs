@@ -2,7 +2,7 @@ use zz_drop_core::agent_proto::KekPayload;
 use zz_drop_core::{
     AgentError, AgentRequest, AgentResponse, Argon2idConfig, CollisionPolicy, DropboxAuth,
     DropboxProfile, NextcloudAuth, NextcloudProfile, PROTOCOL_VERSION, PlainProfile, ProfileSet,
-    ProfileSettings, ProviderProfile,
+    ProfileSettings, ProviderProfile, UnknownProvider,
 };
 
 fn sample_kek_payload() -> KekPayload {
@@ -243,6 +243,104 @@ fn plain_profile_dropbox_roundtrip() {
     // Variant tag uses snake_case ("dropbox") per the existing
     // ProviderProfile serde rename rule.
     assert!(json.contains("\"dropbox\""));
+}
+
+fn sample_unknown_profile() -> PlainProfile {
+    let mut payload = Vec::new();
+    ciborium::into_writer(
+        &ciborium::value::Value::Text("UNKNOWN-PAYLOAD-CANARY".into()),
+        &mut payload,
+    )
+    .unwrap();
+    PlainProfile {
+        profile_version: 1,
+        profile_id: "p-0099".into(),
+        alias: "proton-quiet-lake-7".into(),
+        default_target: "proton-1".into(),
+        providers: vec![ProviderProfile::Unknown(UnknownProvider {
+            tag: "proton".into(),
+            payload_cbor: payload,
+        })],
+        collision_policy: CollisionPolicy::Rename,
+        settings: ProfileSettings::default(),
+        created_at: "2026-07-02T08:00:00Z".into(),
+        updated_at: "2026-07-02T08:00:00Z".into(),
+    }
+}
+
+#[test]
+fn plain_profile_unknown_roundtrip() {
+    let original = sample_unknown_profile();
+    let json = serde_json::to_string(&original).unwrap();
+    let restored: PlainProfile = serde_json::from_str(&json).unwrap();
+    assert!(original == restored);
+    // The carrier serializes under the reserved tag.
+    assert!(json.contains("\"unknown\""));
+}
+
+#[test]
+fn debug_redacts_unknown_provider_payload() {
+    let profile = sample_unknown_profile();
+    let formatted = format!("{profile:?}");
+    assert!(
+        !formatted.contains("UNKNOWN-PAYLOAD-CANARY"),
+        "PlainProfile Debug must redact unknown-provider payload: got `{formatted}`"
+    );
+    let ProviderProfile::Unknown(carrier) = &profile.providers[0] else {
+        panic!("expected Unknown provider");
+    };
+    let formatted = format!("{carrier:?}");
+    assert!(formatted.contains("proton"), "tag itself is not a secret");
+    assert!(formatted.contains("redacted"));
+    assert!(!formatted.contains("UNKNOWN-PAYLOAD-CANARY"));
+}
+
+/// The tag list `profile::format` uses to split known from foreign
+/// providers must track the enum exactly: a variant added without
+/// updating the const would get silently shielded as `Unknown` on
+/// every decode. serde's unknown-variant error enumerates the
+/// accepted tags, so parse them out and compare sets.
+#[test]
+fn known_provider_tags_stay_in_sync_with_enum() {
+    use zz_drop_core::providers::{KNOWN_PROVIDER_TAGS, UNKNOWN_PROVIDER_TAG};
+
+    let err = serde_json::from_str::<ProviderProfile>("{\"zz_not_a_provider\": null}")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown variant"), "got `{err}`");
+    let mut listed: Vec<String> = err
+        .split('`')
+        .skip(3) // skip past: unknown variant `zz_not_a_provider`, expected one of
+        .step_by(2)
+        .map(str::to_string)
+        .collect();
+    listed.retain(|t| t != UNKNOWN_PROVIDER_TAG);
+    let mut expected: Vec<String> =
+        KNOWN_PROVIDER_TAGS.iter().map(|t| t.to_string()).collect();
+    listed.sort();
+    expected.sort();
+    assert_eq!(
+        listed, expected,
+        "KNOWN_PROVIDER_TAGS out of sync with ProviderProfile variants"
+    );
+}
+
+/// The forward-compat carrier must survive the real agent wire
+/// (postcard, not self-describing) — an unlock that carries a foreign
+/// provider round-trips without loss.
+#[test]
+fn agent_unlock_with_unknown_provider_postcard_roundtrip() {
+    use zz_drop_core::agent_proto::{decode_request_body, encode_request_body};
+
+    let req = AgentRequest::Unlock {
+        profile_set: ProfileSet::with_profile(sample_unknown_profile()),
+        kek: sample_kek_payload(),
+        active_alias: "proton-quiet-lake-7".into(),
+        ttl_secs: Some(600),
+    };
+    let body = encode_request_body(&req).unwrap();
+    let restored = decode_request_body(&body).unwrap();
+    assert!(req == restored);
 }
 
 #[test]

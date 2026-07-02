@@ -55,7 +55,9 @@ Each `PlainProfile` carries:
   the picker and as the persistence key in the `last-default-local`
   sidecar
 - `default_target`
-- one provider config (Nextcloud / Google Drive / OneDrive / Dropbox)
+- one provider config (Nextcloud / Google Drive / OneDrive /
+  Dropbox — or a preserved foreign entry, see "Forward
+  compatibility" below)
 - auth secret(s)
 - collision policy
 - agent settings
@@ -77,6 +79,41 @@ caches it between operations within a session.
 ### Capacity
 
 - Local container: no count limit.
+
+### Forward compatibility — unknown providers
+
+Introduced 2026-07-02 on the 0.9.x track (post-0.9.7). The container
+decode tolerates provider entries written by a newer zz-drop:
+
+- An entry whose serde tag is not one this binary knows
+  (`nextcloud`, `google_drive`, `one_drive`, `dropbox`) decodes as
+  an internal carrier (`ProviderProfile::Unknown { tag,
+  payload_cbor }`) instead of failing the whole container. Every
+  other alias stays fully usable; operations on the foreign alias
+  fail with a clear "upgrade zz-drop" diagnostic, and `zz doctor`
+  labels it.
+- On re-encrypt (agent token refresh, TUI add-inner) the carrier is
+  written back under its **original tag with a semantically
+  identical payload** (the CBOR is re-encoded, so non-canonical
+  encodings are normalised): a downgrade-then-upgrade cycle does not
+  lose the foreign alias.
+- Tolerance covers map-shaped entries (serde struct/newtype
+  variants — the shape every current provider uses). A future
+  dataless unit-variant provider would not be protected.
+- The tag `unknown` is **reserved forever** for the carrier; no real
+  provider may ever use it.
+- Bytes on disk for known providers are unchanged and there is no
+  `schema_version` bump. Binaries older than this change still fail
+  the whole container ("payload decode failed") when a foreign
+  entry is present — tolerance protects forward from the release
+  that ships it.
+- A known tag with a corrupt payload still fails the decode loudly;
+  tolerance never masks corruption.
+
+Implementation: shield/restore at the CBOR boundary in
+`core/src/profile/format.rs`. The agent protocol's postcard encoding
+of the same types is deliberately untouched (postcard is not
+self-describing); the carrier rides it as a regular enum variant.
 
 ## Crypto
 

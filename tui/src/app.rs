@@ -1765,6 +1765,7 @@ impl App {
             zz_drop_core::ProviderProfile::GoogleDrive(_) => None,
             zz_drop_core::ProviderProfile::OneDrive(_) => None,
             zz_drop_core::ProviderProfile::Dropbox(_) => None,
+            zz_drop_core::ProviderProfile::Unknown(_) => None,
         }) {
             self.state.provider_kind = ProviderKind::Nextcloud;
             self.state.server_url = nc.server_url.clone();
@@ -1789,6 +1790,7 @@ impl App {
             zz_drop_core::ProviderProfile::Nextcloud(_) => None,
             zz_drop_core::ProviderProfile::OneDrive(_) => None,
             zz_drop_core::ProviderProfile::Dropbox(_) => None,
+            zz_drop_core::ProviderProfile::Unknown(_) => None,
         }) {
             self.state.provider_kind = ProviderKind::GoogleDrive;
             self.gdrive_setup = GoogleDriveSetupState::default();
@@ -1805,6 +1807,7 @@ impl App {
             zz_drop_core::ProviderProfile::Nextcloud(_) => None,
             zz_drop_core::ProviderProfile::GoogleDrive(_) => None,
             zz_drop_core::ProviderProfile::Dropbox(_) => None,
+            zz_drop_core::ProviderProfile::Unknown(_) => None,
         }) {
             self.state.provider_kind = ProviderKind::OneDrive;
             self.onedrive_setup = OneDriveSetupState::default();
@@ -1821,6 +1824,7 @@ impl App {
             zz_drop_core::ProviderProfile::Nextcloud(_) => None,
             zz_drop_core::ProviderProfile::GoogleDrive(_) => None,
             zz_drop_core::ProviderProfile::OneDrive(_) => None,
+            zz_drop_core::ProviderProfile::Unknown(_) => None,
         }) {
             self.state.provider_kind = ProviderKind::Dropbox;
             self.dropbox_setup = DropboxSetupState::default();

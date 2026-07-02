@@ -13,6 +13,19 @@ surfaces frozen on the road to 1.0 are listed in
 
 ## [Unreleased]
 
+### Added
+
+- **`profile.zz` forward compatibility.** A container holding a
+  provider entry written by a newer zz-drop (unknown serde tag) no
+  longer fails to decode as a whole. The foreign entry is preserved
+  internally under the reserved `unknown` carrier tag: every other
+  alias keeps working, operations on the foreign alias fail with a
+  clear "upgrade zz-drop" diagnostic (`zz doctor` labels it), and
+  re-encrypting the container writes the entry back under its
+  original tag (payload semantically preserved; CBOR re-encoded).
+  On-disk bytes for known providers are unchanged; no schema bump;
+  agent protocol untouched.
+
 ## [0.9.7] — 2026-05-25
 
 Security hardening release from a deep audit of the CLI, local agent,

@@ -194,3 +194,71 @@ fn malformed_envelope_is_rejected() {
     let err = decrypt_set("not json", TEST_PASSPHRASE).unwrap_err();
     assert!(matches!(err, ProfileCryptoError::InvalidEnvelope), "got {err:?}");
 }
+
+// ── Unknown-provider tolerance ────────────────────────────────────
+
+/// A profile whose provider carries a serde tag this binary does not
+/// know — what a container written by a newer zz-drop looks like
+/// after decode.
+fn sample_future_profile(alias: &str, tag: &str) -> PlainProfile {
+    let mut payload = Vec::new();
+    ciborium::into_writer(
+        &ciborium::value::Value::Text("FUTURE-PAYLOAD-CANARY".into()),
+        &mut payload,
+    )
+    .unwrap();
+    let mut profile = sample_profile(alias);
+    profile.providers = vec![zz_drop_core::ProviderProfile::Unknown(
+        zz_drop_core::UnknownProvider {
+            tag: tag.into(),
+            payload_cbor: payload,
+        },
+    )];
+    profile
+}
+
+/// End-to-end tolerance: a container holding a foreign provider entry
+/// (written on disk under its original tag, see the in-module
+/// `tolerance_tests` in `profile::format`) decrypts with every alias
+/// intact — the known one typed, the foreign one preserved.
+#[test]
+fn unknown_provider_survives_set_roundtrip() {
+    let mut set = ProfileSet::new();
+    set.profiles.push(sample_profile("nc-home"));
+    set.profiles.push(sample_future_profile("proton-fut", "proton"));
+
+    let (envelope, _kek) = encrypt_set_with_config(&set, TEST_PASSPHRASE, &FAST_KDF).unwrap();
+    let (restored, _kek) = decrypt_set(&envelope, TEST_PASSPHRASE).unwrap();
+    assert!(set == restored);
+    assert_eq!(restored.aliases(), vec!["nc-home", "proton-fut"]);
+}
+
+/// The write-back path must not destroy the foreign alias: decrypt,
+/// mutate an unrelated profile, re-encrypt with the cached KEK (the
+/// agent's token-refresh path), decrypt again.
+#[test]
+fn mutation_reencrypt_preserves_unknown_provider() {
+    let mut set = ProfileSet::new();
+    set.profiles.push(sample_profile("nc-home"));
+    set.profiles.push(sample_future_profile("proton-fut", "proton"));
+
+    let (envelope, kek) = encrypt_set_with_config(&set, TEST_PASSPHRASE, &FAST_KDF).unwrap();
+    let (mut loaded, _) = decrypt_set(&envelope, TEST_PASSPHRASE).unwrap();
+
+    loaded.profiles.push(sample_profile("nc-new"));
+    let envelope2 = encrypt_set_with_kek(&loaded, &kek).unwrap();
+    let (final_set, _) = decrypt_set(&envelope2, TEST_PASSPHRASE).unwrap();
+
+    assert_eq!(final_set.aliases(), vec!["nc-home", "proton-fut", "nc-new"]);
+    assert!(final_set.profiles[1] == set.profiles[1], "foreign alias must be byte-preserved");
+}
+
+#[test]
+fn unknown_provider_survives_disk_roundtrip() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("profiles-local.zz");
+    let set = ProfileSet::with_profile(sample_future_profile("proton-disk", "proton"));
+    save_set_zz_with_config(&set, TEST_PASSPHRASE, &path, &FAST_KDF).unwrap();
+    let (loaded, _kek) = load_set_zz(&path, TEST_PASSPHRASE).unwrap();
+    assert!(set == loaded);
+}

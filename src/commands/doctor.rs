@@ -281,6 +281,10 @@ fn describe_providers(providers: &[ProviderProfile]) -> String {
             ProviderProfile::GoogleDrive(_) => "google-drive",
             ProviderProfile::OneDrive(_) => "onedrive",
             ProviderProfile::Dropbox(_) => "dropbox",
+            ProviderProfile::Unknown(u) => {
+                parts.push(format!("{} (unsupported — upgrade zz-drop)", u.tag));
+                continue;
+            }
         };
         parts.push(label.to_string());
     }

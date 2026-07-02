@@ -127,6 +127,7 @@ fn provider_summary(profile: &PlainProfile) -> &'static str {
         Some(ProviderProfile::GoogleDrive(_)) => "Google Drive · OAuth",
         Some(ProviderProfile::OneDrive(_)) => "OneDrive · OAuth",
         Some(ProviderProfile::Dropbox(_)) => "Dropbox · OAuth",
+        Some(ProviderProfile::Unknown(_)) => "unsupported · upgrade zz-drop",
         None => "—",
     }
 }

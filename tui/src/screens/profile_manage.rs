@@ -91,26 +91,34 @@ impl ProfileManageScreen {
             ProviderProfile::Nextcloud(n) => Some(n),
             ProviderProfile::GoogleDrive(_)
             | ProviderProfile::OneDrive(_)
-            | ProviderProfile::Dropbox(_) => None,
+            | ProviderProfile::Dropbox(_)
+            | ProviderProfile::Unknown(_) => None,
         });
         let gd = profile.providers.iter().find_map(|p| match p {
             ProviderProfile::GoogleDrive(g) => Some(g),
             ProviderProfile::Nextcloud(_)
             | ProviderProfile::OneDrive(_)
-            | ProviderProfile::Dropbox(_) => None,
+            | ProviderProfile::Dropbox(_)
+            | ProviderProfile::Unknown(_) => None,
         });
         let od = profile.providers.iter().find_map(|p| match p {
             ProviderProfile::OneDrive(o) => Some(o),
             ProviderProfile::Nextcloud(_)
             | ProviderProfile::GoogleDrive(_)
-            | ProviderProfile::Dropbox(_) => None,
+            | ProviderProfile::Dropbox(_)
+            | ProviderProfile::Unknown(_) => None,
         });
         let db = profile.providers.iter().find_map(|p| match p {
             ProviderProfile::Dropbox(d) => Some(d),
             ProviderProfile::Nextcloud(_)
             | ProviderProfile::GoogleDrive(_)
-            | ProviderProfile::OneDrive(_) => None,
+            | ProviderProfile::OneDrive(_)
+            | ProviderProfile::Unknown(_) => None,
         });
+        let has_unknown = profile
+            .providers
+            .iter()
+            .any(|p| matches!(p, ProviderProfile::Unknown(_)));
 
         let provider_label = if nc.is_some() {
             "Nextcloud · WebDAV"
@@ -120,6 +128,8 @@ impl ProfileManageScreen {
             "OneDrive · OAuth"
         } else if db.is_some() {
             "Dropbox · OAuth"
+        } else if has_unknown {
+            "unsupported · upgrade zz-drop"
         } else {
             "—"
         };

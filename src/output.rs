@@ -514,6 +514,7 @@ pub fn profile_target(profile: &PlainProfile) -> String {
                 format!("dropbox/{root}")
             }
         }
+        Some(ProviderProfile::Unknown(u)) => format!("{} (unsupported)", u.tag),
         None => "—".to_string(),
     }
 }

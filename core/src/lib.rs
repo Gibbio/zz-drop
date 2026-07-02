@@ -31,4 +31,4 @@ pub use providers::dropbox::{DropboxAuth, DropboxProfile};
 pub use providers::google_drive::{GoogleDriveAuth, GoogleDriveProfile};
 pub use providers::nextcloud::{NextcloudAuth, NextcloudProfile};
 pub use providers::onedrive::{OneDriveAuth, OneDriveProfile};
-pub use providers::{CollisionPolicy, ProviderProfile};
+pub use providers::{CollisionPolicy, ProviderProfile, UnknownProvider};

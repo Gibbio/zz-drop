@@ -13,6 +13,10 @@ use crate::crypto::profile_envelope::{
 };
 use crate::profile::set::{PROFILE_SET_SCHEMA_V2, ProfileKek, ProfileSet};
 use crate::profile::types::PlainProfile;
+use crate::providers::{
+    KNOWN_PROVIDER_TAGS, ProviderProfile, UNKNOWN_PROVIDER_TAG, UnknownProvider,
+};
+use ciborium::value::Value;
 
 #[derive(Debug, Error)]
 pub enum ProfileCryptoError {
@@ -246,8 +250,21 @@ pub fn encrypt_set_with_kek(
     let mut plaintext: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(1024));
     {
         let writer: &mut Vec<u8> = &mut plaintext;
-        ciborium::into_writer(set, writer)
-            .map_err(|_| ProfileCryptoError::PayloadEncode)?;
+        if set_holds_unknown_provider(set) {
+            // Route through a raw CBOR value so `Unknown` carriers are
+            // written back under their original serde tag with their
+            // original payload — a container that came from a newer
+            // zz-drop re-encrypts without losing the foreign entry.
+            // The intermediate value tree is transient plain heap (not
+            // zeroized); it exists only on this fallback path.
+            let mut value = value_from(set)?;
+            restore_unknown_providers(&mut value)?;
+            ciborium::into_writer(&value, writer)
+                .map_err(|_| ProfileCryptoError::PayloadEncode)?;
+        } else {
+            ciborium::into_writer(set, writer)
+                .map_err(|_| ProfileCryptoError::PayloadEncode)?;
+        }
     }
 
     let ciphertext = aead_encrypt(&kek.key, &nonce, &plaintext)?;
@@ -347,10 +364,153 @@ pub fn decrypt_set(
             return Ok((set, kek));
         }
     }
+    // The typed decode fails on provider entries written by a newer
+    // zz-drop (unknown serde tags). Retry through a raw CBOR value,
+    // shielding foreign entries as `ProviderProfile::Unknown` so the
+    // rest of the container stays usable. Known-tag entries are left
+    // untouched: a corrupt known provider must still fail loudly
+    // below. The value tree is transient plain heap (not zeroized);
+    // it exists only on this fallback path.
+    if let Ok(mut value) = ciborium::from_reader::<Value, _>(plaintext.as_slice())
+        && shield_unknown_providers(&mut value).is_ok()
+        && let Ok(set) = value_to::<ProfileSet>(&value)
+        && set.schema_version >= PROFILE_SET_SCHEMA_V2
+    {
+        let kek = ProfileKek::new(key, salt, config);
+        return Ok((set, kek));
+    }
     if ciborium::from_reader::<PlainProfile, _>(plaintext.as_slice()).is_ok() {
         return Err(ProfileCryptoError::LegacyFormat);
     }
     Err(ProfileCryptoError::PayloadDecode)
+}
+
+// ── Unknown-provider tolerance ────────────────────────────────────
+//
+// `ProviderProfile` is an externally tagged serde enum. Its derived
+// impls must not change: the agent protocol encodes the same types
+// with postcard, which is not self-describing and relies on the
+// derived variant encoding. Tolerance therefore lives entirely at
+// this CBOR boundary: on decode, entries under a tag this binary
+// does not know are rewritten into the reserved `unknown` carrier
+// form before the typed decode; on encode, carriers are rewritten
+// back to their original tag + payload. Bytes on disk for known
+// providers are identical to what the derived impls produce.
+
+fn set_holds_unknown_provider(set: &ProfileSet) -> bool {
+    set.profiles
+        .iter()
+        .any(|p| p.providers.iter().any(|pr| matches!(pr, ProviderProfile::Unknown(_))))
+}
+
+fn value_from<T: serde::Serialize>(t: &T) -> Result<Value, ProfileCryptoError> {
+    let mut buf = Vec::new();
+    ciborium::into_writer(t, &mut buf).map_err(|_| ProfileCryptoError::PayloadEncode)?;
+    ciborium::from_reader(buf.as_slice()).map_err(|_| ProfileCryptoError::PayloadEncode)
+}
+
+fn value_to<T: serde::de::DeserializeOwned>(v: &Value) -> Result<T, ProfileCryptoError> {
+    let mut buf = Vec::new();
+    ciborium::into_writer(v, &mut buf).map_err(|_| ProfileCryptoError::PayloadDecode)?;
+    ciborium::from_reader(buf.as_slice()).map_err(|_| ProfileCryptoError::PayloadDecode)
+}
+
+/// Walks `root` as a `ProfileSet` value and applies `rewrite` to each
+/// entry of each profile's `providers` array. Unexpected shapes are
+/// skipped, not errors: the typed decode after the walk is the
+/// authority on validity.
+fn for_each_provider_entry(
+    root: &mut Value,
+    rewrite: &mut dyn FnMut(&mut Value) -> Result<(), ProfileCryptoError>,
+) -> Result<(), ProfileCryptoError> {
+    let Value::Map(root_entries) = root else {
+        return Ok(());
+    };
+    for (root_key, root_val) in root_entries.iter_mut() {
+        if !matches!(root_key, Value::Text(k) if k == "profiles") {
+            continue;
+        }
+        let Value::Array(profiles) = root_val else {
+            continue;
+        };
+        for profile in profiles.iter_mut() {
+            let Value::Map(fields) = profile else {
+                continue;
+            };
+            for (field_key, field_val) in fields.iter_mut() {
+                if !matches!(field_key, Value::Text(k) if k == "providers") {
+                    continue;
+                }
+                let Value::Array(providers) = field_val else {
+                    continue;
+                };
+                for entry in providers.iter_mut() {
+                    rewrite(entry)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Decode direction: rewrite `{<foreign-tag>: payload}` into the
+/// reserved carrier form so the typed decode preserves it as
+/// [`ProviderProfile::Unknown`].
+fn shield_unknown_providers(root: &mut Value) -> Result<(), ProfileCryptoError> {
+    for_each_provider_entry(root, &mut |entry| {
+        let Value::Map(kv) = &*entry else {
+            return Ok(());
+        };
+        if kv.len() != 1 {
+            return Ok(());
+        }
+        let Value::Text(tag) = &kv[0].0 else {
+            return Ok(());
+        };
+        if tag == UNKNOWN_PROVIDER_TAG || KNOWN_PROVIDER_TAGS.contains(&tag.as_str()) {
+            return Ok(());
+        }
+        let mut payload = Vec::new();
+        ciborium::into_writer(&kv[0].1, &mut payload)
+            .map_err(|_| ProfileCryptoError::PayloadDecode)?;
+        let carrier = ProviderProfile::Unknown(UnknownProvider {
+            tag: tag.clone(),
+            payload_cbor: payload,
+        });
+        *entry = value_from(&carrier).map_err(|_| ProfileCryptoError::PayloadDecode)?;
+        Ok(())
+    })
+}
+
+/// Encode direction: rewrite the reserved carrier form back into
+/// `{<original-tag>: payload}` so the container on disk looks exactly
+/// as the newer binary wrote it.
+fn restore_unknown_providers(root: &mut Value) -> Result<(), ProfileCryptoError> {
+    for_each_provider_entry(root, &mut |entry| {
+        let Value::Map(kv) = &*entry else {
+            return Ok(());
+        };
+        if kv.len() != 1 || !matches!(&kv[0].0, Value::Text(t) if t == UNKNOWN_PROVIDER_TAG) {
+            return Ok(());
+        }
+        let ProviderProfile::Unknown(carrier) =
+            value_to::<ProviderProfile>(entry).map_err(|_| ProfileCryptoError::PayloadEncode)?
+        else {
+            return Ok(());
+        };
+        // A carrier under a known or reserved tag can only come from
+        // API misuse (shield never builds one); writing it would brick
+        // the container at the next decode. Refuse loudly instead.
+        if carrier.tag == UNKNOWN_PROVIDER_TAG
+            || KNOWN_PROVIDER_TAGS.contains(&carrier.tag.as_str())
+        {
+            return Err(ProfileCryptoError::PayloadEncode);
+        }
+        let payload: Value = ciborium::from_reader(carrier.payload_cbor.as_slice())
+            .map_err(|_| ProfileCryptoError::PayloadEncode)?;
+        *entry = Value::Map(vec![(Value::Text(carrier.tag), payload)]);
+        Ok(())
+    })
 }
 
 /// Encrypt a `ProfileSet` with `passphrase` and write the JSON
@@ -414,5 +574,206 @@ fn write_private(path: &Path, data: &[u8]) -> Result<(), ProfileCryptoError> {
     #[cfg(not(unix))]
     {
         std::fs::write(path, data).map_err(|_| ProfileCryptoError::Io)
+    }
+}
+
+#[cfg(test)]
+mod tolerance_tests {
+    use super::*;
+    use crate::profile::types::ProfileSettings;
+    use crate::providers::{CollisionPolicy, NextcloudAuth, NextcloudProfile};
+
+    fn nextcloud_profile(alias: &str) -> PlainProfile {
+        PlainProfile {
+            profile_version: 1,
+            profile_id: format!("p-{alias}"),
+            alias: alias.into(),
+            default_target: "nextcloud-1".into(),
+            providers: vec![ProviderProfile::Nextcloud(NextcloudProfile {
+                server_url: "https://example.org".into(),
+                username: "user".into(),
+                auth: NextcloudAuth::AppPassword {
+                    secret: "topsecret".into(),
+                },
+                remote_root: "/zz-drop".into(),
+            })],
+            collision_policy: CollisionPolicy::Rename,
+            settings: ProfileSettings::default(),
+            created_at: "2026-07-02T08:00:00Z".into(),
+            updated_at: "2026-07-02T08:00:00Z".into(),
+        }
+    }
+
+    fn future_profile(alias: &str, tag: &str) -> PlainProfile {
+        let mut payload = Vec::new();
+        ciborium::into_writer(&Value::Text("future-payload".into()), &mut payload).unwrap();
+        let mut p = nextcloud_profile(alias);
+        p.providers = vec![ProviderProfile::Unknown(UnknownProvider {
+            tag: tag.into(),
+            payload_cbor: payload,
+        })];
+        p
+    }
+
+    fn provider_entries(root: &Value) -> Vec<&Value> {
+        let Value::Map(entries) = root else {
+            panic!("root is not a map")
+        };
+        let mut out = Vec::new();
+        for (k, v) in entries {
+            if !matches!(k, Value::Text(t) if t == "profiles") {
+                continue;
+            }
+            let Value::Array(profiles) = v else { continue };
+            for profile in profiles {
+                let Value::Map(fields) = profile else { continue };
+                for (fk, fv) in fields {
+                    if !matches!(fk, Value::Text(t) if t == "providers") {
+                        continue;
+                    }
+                    let Value::Array(providers) = fv else { continue };
+                    out.extend(providers.iter());
+                }
+            }
+        }
+        out
+    }
+
+    fn entry_tag(entry: &Value) -> &str {
+        let Value::Map(kv) = entry else {
+            panic!("provider entry is not a map")
+        };
+        let Value::Text(tag) = &kv[0].0 else {
+            panic!("provider tag is not text")
+        };
+        tag
+    }
+
+    fn direct_kek() -> ProfileKek {
+        use crate::crypto::aead::KEY_LEN;
+        ProfileKek::new(
+            Zeroizing::new([7u8; KEY_LEN]),
+            [9u8; SALT_LEN],
+            Argon2idConfig::DEFAULT,
+        )
+    }
+
+    fn decrypt_envelope_payload(envelope: &str, kek: &ProfileKek) -> Vec<u8> {
+        let parsed: ProfileEnvelope = serde_json::from_str(envelope).unwrap();
+        let nonce: [u8; NONCE_LEN] = B64
+            .decode(&parsed.cipher.nonce)
+            .unwrap()
+            .as_slice()
+            .try_into()
+            .unwrap();
+        let ciphertext = B64.decode(&parsed.payload.ciphertext).unwrap();
+        aead_decrypt(&kek.key, &nonce, &ciphertext).unwrap()
+    }
+
+    fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|w| w == needle)
+    }
+
+    /// Regression armor for the write-back guarantee: struct-level
+    /// roundtrips cannot distinguish carrier form from original-tag
+    /// form on disk (both decode back to the same `Unknown`), so this
+    /// decrypts the actual encrypted payload and scans the bytes.
+    #[test]
+    fn encrypted_payload_carries_the_foreign_tag_not_the_carrier() {
+        let set = ProfileSet {
+            schema_version: PROFILE_SET_SCHEMA_V2,
+            profiles: vec![future_profile("fut", "proton")],
+        };
+        let kek = direct_kek();
+        let envelope = encrypt_set_with_kek(&set, &kek).unwrap();
+        let plaintext = decrypt_envelope_payload(&envelope, &kek);
+        assert!(contains_bytes(&plaintext, b"proton"));
+        assert!(!contains_bytes(&plaintext, b"payload_cbor"));
+        assert!(!contains_bytes(&plaintext, b"unknown"));
+    }
+
+    /// A hand-built carrier under a known or reserved tag would write
+    /// a container the next decode cannot read; the encode path must
+    /// refuse it loudly instead of bricking the file.
+    #[test]
+    fn restore_refuses_known_or_reserved_carrier_tags() {
+        for tag in ["nextcloud", "one_drive", "unknown"] {
+            let set = ProfileSet {
+                schema_version: PROFILE_SET_SCHEMA_V2,
+                profiles: vec![future_profile("fut", tag)],
+            };
+            let err = encrypt_set_with_kek(&set, &direct_kek()).unwrap_err();
+            assert!(
+                matches!(err, ProfileCryptoError::PayloadEncode),
+                "tag {tag}: got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn restore_writes_original_tag_not_the_carrier_form() {
+        let set = ProfileSet {
+            schema_version: PROFILE_SET_SCHEMA_V2,
+            profiles: vec![nextcloud_profile("nc"), future_profile("fut", "proton")],
+        };
+        let mut value = value_from(&set).unwrap();
+        restore_unknown_providers(&mut value).unwrap();
+        let tags: Vec<&str> = provider_entries(&value).iter().map(|e| entry_tag(e)).collect();
+        assert_eq!(tags, vec!["nextcloud", "proton"]);
+    }
+
+    #[test]
+    fn shield_then_typed_decode_round_trips_the_carrier() {
+        let set = ProfileSet {
+            schema_version: PROFILE_SET_SCHEMA_V2,
+            profiles: vec![nextcloud_profile("nc"), future_profile("fut", "proton")],
+        };
+        let mut value = value_from(&set).unwrap();
+        restore_unknown_providers(&mut value).unwrap();
+        shield_unknown_providers(&mut value).unwrap();
+        let restored: ProfileSet = value_to(&value).unwrap();
+        assert!(restored == set);
+    }
+
+    #[test]
+    fn shield_leaves_known_tags_untouched() {
+        let set = ProfileSet {
+            schema_version: PROFILE_SET_SCHEMA_V2,
+            profiles: vec![nextcloud_profile("nc")],
+        };
+        let mut value = value_from(&set).unwrap();
+        shield_unknown_providers(&mut value).unwrap();
+        let restored: ProfileSet = value_to(&value).unwrap();
+        assert!(restored == set);
+    }
+
+    #[test]
+    fn corrupt_known_provider_still_fails_the_typed_decode() {
+        let set = ProfileSet {
+            schema_version: PROFILE_SET_SCHEMA_V2,
+            profiles: vec![nextcloud_profile("nc")],
+        };
+        let mut value = value_from(&set).unwrap();
+        // Corrupt the nextcloud payload: shielding must not hide it.
+        {
+            let Value::Map(entries) = &mut value else { panic!() };
+            for (k, v) in entries.iter_mut() {
+                if !matches!(k, Value::Text(t) if t == "profiles") {
+                    continue;
+                }
+                let Value::Array(profiles) = v else { continue };
+                let Value::Map(fields) = &mut profiles[0] else { panic!() };
+                for (fk, fv) in fields.iter_mut() {
+                    if !matches!(fk, Value::Text(t) if t == "providers") {
+                        continue;
+                    }
+                    let Value::Array(providers) = fv else { continue };
+                    let Value::Map(kv) = &mut providers[0] else { panic!() };
+                    kv[0].1 = Value::Integer(42.into());
+                }
+            }
+        }
+        shield_unknown_providers(&mut value).unwrap();
+        assert!(value_to::<ProfileSet>(&value).is_err());
     }
 }

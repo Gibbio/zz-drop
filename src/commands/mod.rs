@@ -383,5 +383,6 @@ pub(crate) fn build_remote(profile: &PlainProfile) -> Result<AnyRemote, &'static
                 .map_err(|e| zz_drop_core::providers::dropbox::diagnose(&e))?;
             Ok(AnyRemote::Dropbox(DropboxRemoteFs::new(client)))
         }
+        ProviderProfile::Unknown(_) => Err(zz_drop_core::providers::UnknownProvider::diagnose()),
     }
 }
